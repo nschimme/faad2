@@ -892,6 +892,7 @@ static int decodeMP4file(char *mp4file, char *sndfile, char *adts_fn, int to_std
     {
         if (mp4config.has_gapless_info)
         {
+            /* FAAD2's internal engine flushes 1,024 samples automatically; subtract from container priming delay */
             if (mp4config.gapless_delay > 1024)
                 net_start_trim = mp4config.gapless_delay - 1024;
             else
@@ -991,6 +992,7 @@ static int decodeMP4file(char *mp4file, char *sndfile, char *adts_fn, int to_std
 
             if (enable_gapless_trim)
             {
+                /* Start slicing: skip initial delay samples across frame boundary */
                 if (net_start_trim > 0)
                 {
                     if (frame_audio_frames <= net_start_trim)
@@ -1015,6 +1017,7 @@ static int decodeMP4file(char *mp4file, char *sndfile, char *adts_fn, int to_std
                     }
                 }
 
+                /* End slicing: truncate buffer when target valid audio count is met */
                 if (sample_count > 0 && target_valid_samples > 0)
                 {
                     if (written_audio_frames + frame_audio_frames >= target_valid_samples)
