@@ -626,27 +626,27 @@ static int ilstin(int size)
         char *id;
         int flag;
     } tags[] = {
-        {"Album       ", "\xa9" "alb"},
-        {"Album Artist", "aART"},
-        {"Artist      ", "\xa9" "ART"},
-        {"Comment     ", "\xa9" "cmt"},
-        {"Cover image ", "covr"},
-        {"Compilation ", "cpil"},
-        {"Copyright   ", "cprt"},
-        {"Date        ", "\xa9" "day"},
+        {"Album       ", "\xa9" "alb", 0},
+        {"Album Artist", "aART", 0},
+        {"Artist      ", "\xa9" "ART", 0},
+        {"Comment     ", "\xa9" "cmt", 0},
+        {"Cover image ", "covr", 0},
+        {"Compilation ", "cpil", 0},
+        {"Copyright   ", "cprt", 0},
+        {"Date        ", "\xa9" "day", 0},
         {"Disc#       ", "disk", NUMSET},
         {"Genre       ", "gnre", GENRE},
-        {"Genre       ", "\xa9" "gen"},
-        {"Grouping    ", "\xa9" "grp"},
-        {"Lyrics      ", "\xa9" "lyr"},
-        {"Title       ", "\xa9" "nam"},
-        {"Rating      ", "rtng"},
-        {"BPM         ", "tmpo"},
-        {"Encoder     ", "\xa9" "too"},
+        {"Genre       ", "\xa9" "gen", 0},
+        {"Grouping    ", "\xa9" "grp", 0},
+        {"Lyrics      ", "\xa9" "lyr", 0},
+        {"Title       ", "\xa9" "nam", 0},
+        {"Rating      ", "rtng", 0},
+        {"BPM         ", "tmpo", 0},
+        {"Encoder     ", "\xa9" "too", 0},
         {"Track       ", "trkn", NUMSET},
-        {"Composer    ", "\xa9" "wrt"},
+        {"Composer    ", "\xa9" "wrt", 0},
         {0, "----", EXTAG},
-        {0},
+        {0, 0, 0},
     };
 
     static const char *genres[] = {
@@ -744,7 +744,7 @@ static int ilstin(int size)
             {
                 uint32_t sub_size = u32in();
                 uint8_t sub_id[5] = {0};
-                if (sub_size < 8 || sub_size - 8 > asize - 8)
+                if (sub_size < 8 || (asize >= 8 && sub_size - 8 > (uint32_t)(asize - 8)))
                     break;
                 asize -= 8;
                 if (datain(sub_id, 4) < 4)
