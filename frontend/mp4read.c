@@ -592,6 +592,7 @@ static int metain(int size)
 static int hdlr2in(int size)
 {
     uint8_t buf[4];
+    int original_size = size;
 
     if (size < 12)
         return ERR_FAIL;
@@ -612,7 +613,7 @@ static int hdlr2in(int size)
         size--;
     }
 
-    return size;
+    return original_size;
 }
 
 static int ilstin(int size)
@@ -635,6 +636,7 @@ static int ilstin(int size)
         {"Date        ", "\xa9" "day"},
         {"Disc#       ", "disk", NUMSET},
         {"Genre       ", "gnre", GENRE},
+        {"Genre       ", "\xa9" "gen"},
         {"Grouping    ", "\xa9" "grp"},
         {"Lyrics      ", "\xa9" "lyr"},
         {"Title       ", "\xa9" "nam"},
@@ -688,7 +690,7 @@ static int ilstin(int size)
         "Unknown",
     };
 
-    fprintf(stderr, "----------tag list-------------\n");
+    tag_fprintf(stderr, "----------tag list-------------\n");
     while(read < size)
     {
         int asize, dsize;
@@ -712,14 +714,17 @@ static int ilstin(int size)
         }
 
         if (tags[cnt].name)
-            fprintf(stderr, "%s :   ", tags[cnt].name);
+        {
+            tag_fprintf(stderr, "%s :   ", tags[cnt].name);
+        }
         else
         {
             if (tags[cnt].flag != EXTAG)
-                fprintf(stderr, "'%s'       :   ", id);
+                tag_fprintf(stderr, "'%s'       :   ", id);
         }
 
         dsize = u32in();
+        (void)dsize;
         asize -= 4;
         if (datain(id, 4) < 4)
             return ERR_FAIL;
@@ -732,77 +737,80 @@ static int ilstin(int size)
         }
         else
         {
-            int spc;
             char ext_name[256] = {0};
             char ext_data[512] = {0};
 
-            if (memcmp(id, "mean", 4))
-                goto skip;
-            dsize -= 8;
-            while (dsize > 0)
+            while (asize >= 8)
             {
-                u8in();
-                asize--;
-                dsize--;
-            }
-            if (asize >= 8)
-            {
-                dsize = u32in() - 8;
-                asize -= 4;
-                if (datain(id, 4) < 4)
+                uint32_t sub_size = u32in();
+                uint8_t sub_id[5] = {0};
+                if (sub_size < 8 || sub_size - 8 > asize - 8)
+                    break;
+                asize -= 8;
+                if (datain(sub_id, 4) < 4)
                     return ERR_FAIL;
-                asize -= 4;
-                if (memcmp(id, "name", 4))
-                    goto skip;
-                u32in();
-                asize -= 4;
-                dsize -= 4;
-            }
-            spc = 13 - dsize;
-            if (spc < 0) spc = 0;
-            int ext_name_len = 0;
-            while (dsize > 0)
-            {
-                char ch = u8in();
-                if (ext_name_len < (int)sizeof(ext_name) - 1)
-                    ext_name[ext_name_len++] = ch;
-                tag_fprintf(stderr, "%c", ch);
-                asize--;
-                dsize--;
-            }
-            ext_name[ext_name_len] = '\0';
+                uint32_t sub_payload_len = sub_size - 8;
 
-            while (spc--)
-                tag_fprintf(stderr, " ");
-            tag_fprintf(stderr, ":   ");
-            if (asize >= 8)
-            {
-                dsize = u32in() - 8;
-                asize -= 4;
-                if (datain(id, 4) < 4)
-                    return ERR_FAIL;
-                asize -= 4;
-                if (memcmp(id, "data", 4))
-                    goto skip;
-                u32in(); // type/flags
-                asize -= 4;
-                dsize -= 4;
-                u32in(); // locale/reserved
-                asize -= 4;
-                dsize -= 4;
+                if (memcmp(sub_id, "mean", 4) == 0)
+                {
+                    while (sub_payload_len > 0 && asize > 0)
+                    {
+                        u8in();
+                        asize--;
+                        sub_payload_len--;
+                    }
+                }
+                else if (memcmp(sub_id, "name", 4) == 0)
+                {
+                    if (sub_payload_len >= 4 && asize >= 4)
+                    {
+                        u32in(); // version/flags
+                        asize -= 4;
+                        sub_payload_len -= 4;
+                    }
+                    int ext_name_len = 0;
+                    while (sub_payload_len > 0 && asize > 0)
+                    {
+                        char ch = u8in();
+                        if (ext_name_len < (int)sizeof(ext_name) - 1)
+                            ext_name[ext_name_len++] = ch;
+                        asize--;
+                        sub_payload_len--;
+                    }
+                    ext_name[ext_name_len] = '\0';
+                }
+                else if (memcmp(sub_id, "data", 4) == 0)
+                {
+                    if (sub_payload_len >= 8 && asize >= 8)
+                    {
+                        u32in(); // version/flags
+                        u32in(); // locale
+                        asize -= 8;
+                        sub_payload_len -= 8;
+                    }
+                    int ext_data_len = 0;
+                    while (sub_payload_len > 0 && asize > 0)
+                    {
+                        char ch = u8in();
+                        if (ext_data_len < (int)sizeof(ext_data) - 1)
+                            ext_data[ext_data_len++] = ch;
+                        asize--;
+                        sub_payload_len--;
+                    }
+                    ext_data[ext_data_len] = '\0';
+                }
+                else
+                {
+                    while (sub_payload_len > 0 && asize > 0)
+                    {
+                        u8in();
+                        asize--;
+                        sub_payload_len--;
+                    }
+                }
             }
-            int ext_data_len = 0;
-            while (dsize > 0)
-            {
-                char ch = u8in();
-                if (ext_data_len < (int)sizeof(ext_data) - 1)
-                    ext_data[ext_data_len++] = ch;
-                tag_fprintf(stderr, "%c", ch);
-                asize--;
-                dsize--;
-            }
-            ext_data[ext_data_len] = '\0';
-            tag_fprintf(stderr, "\n");
+
+            tag_fprintf(stderr, "%-13s:   %s\n", ext_name[0] ? ext_name : "----", ext_data);
 
             if (strcmp(ext_name, "iTunSMPB") == 0 || strstr(ext_data, "iTunSMPB") != NULL)
             {
@@ -854,9 +862,9 @@ static int ilstin(int size)
                 u16in();
                 asize -= 2;
 
-                fprintf(stderr, "%d", u16in());
+                tag_fprintf(stderr, "%d", u16in());
                 asize -= 2;
-                fprintf(stderr, "/%d", u16in());
+                tag_fprintf(stderr, "/%d", u16in());
                 asize -= 2;
                 break;
             case GENRE:
@@ -868,35 +876,34 @@ static int ilstin(int size)
                     gnum--;
                     if (gnum >= 147)
                         gnum = 147;
-                    fprintf(stderr, "%s", genres[gnum]);
+                    tag_fprintf(stderr, "%s", genres[gnum]);
                 }
                 break;
             default:
                 while(asize > 0)
                 {
-                    fprintf(stderr, "%d/", u16in());
+                    tag_fprintf(stderr, "%d/", u16in());
                     asize-=2;
                 }
             }
             break;
         case 0x15:
-            //fprintf(stderr, "(8bit data)");
             while(asize > 0)
             {
-                fprintf(stderr, "%d", u8in());
+                tag_fprintf(stderr, "%d", u8in());
                 asize--;
                 if (asize)
-                    fprintf(stderr, "/");
+                    tag_fprintf(stderr, "/");
             }
             break;
         case 0xd:
-            fprintf(stderr, "(image data)");
+            tag_fprintf(stderr, "(image data)");
             break;
         default:
-            fprintf(stderr, "(unknown data type)");
+            tag_fprintf(stderr, "(unknown data type)");
             break;
         }
-        fprintf(stderr, "\n");
+        tag_fprintf(stderr, "\n");
 
     skip:
         // skip to the end of atom
@@ -906,7 +913,7 @@ static int ilstin(int size)
             asize--;
         }
     }
-    fprintf(stderr, "-------------------------------\n");
+    tag_fprintf(stderr, "-------------------------------\n");
 
     return size;
 }
@@ -1188,9 +1195,13 @@ int mp4read_open(char *name)
 {
     uint32_t atomsize;
     int ret;
+    int v_header = mp4config.verbose.header;
+    int v_tags = mp4config.verbose.tags;
 
     mp4read_close();
     memset(&mp4config, 0, sizeof(mp4config_t));
+    mp4config.verbose.header = v_header;
+    mp4config.verbose.tags = v_tags;
 
     g_fin = faad_fopen(name, "rb");
     if (!g_fin)
