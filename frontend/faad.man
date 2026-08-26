@@ -43,7 +43,7 @@ Set the output file format. The number takes one of the following values:
 .RE
 .RE
 .TP
-.BI \-g
+.B \-g ", \-\^\-no\-gapless"
 Disable sample-accurate gapless decoding (output un-trimmed raw PCM).
 .TP
 .B \-h ", \-\^\-help"

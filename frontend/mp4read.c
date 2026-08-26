@@ -60,6 +60,7 @@ static FILE *g_fin = NULL;
 enum {ERR_OK = 0, ERR_FAIL = -1, ERR_UNSUPPORTED = -2};
 
 #define freeMem(A) if (*(A)) {free(*(A)); *(A) = NULL;}
+#define tag_fprintf(...) if (mp4config.verbose.tags) fprintf(__VA_ARGS__)
 
 static size_t datain(void *data, size_t size)
 {
@@ -592,22 +593,24 @@ static int hdlr2in(int size)
 {
     uint8_t buf[4];
 
+    if (size < 12)
+        return ERR_FAIL;
+
     // version/flags
     u32in();
     // Predefined
     u32in();
     // Handler type
     datain(buf, 4);
-    if (memcmp(buf, "mdir", 4))
+    if (memcmp(buf, "mdir", 4) && memcmp(buf, "mdta", 4))
         return ERR_FAIL;
-    datain(buf, 4);
-    if (memcmp(buf, "appl", 4))
-        return ERR_FAIL;
-    // Reserved
-    u32in();
-    u32in();
-    // null terminator
-    u8in();
+
+    size -= 12;
+    while (size > 0)
+    {
+        u8in();
+        size--;
+    }
 
     return size;
 }
@@ -730,6 +733,8 @@ static int ilstin(int size)
         else
         {
             int spc;
+            char ext_name[256] = {0};
+            char ext_data[512] = {0};
 
             if (memcmp(id, "mean", 4))
                 goto skip;
@@ -755,15 +760,21 @@ static int ilstin(int size)
             }
             spc = 13 - dsize;
             if (spc < 0) spc = 0;
+            int ext_name_len = 0;
             while (dsize > 0)
             {
-                fprintf(stderr, "%c",u8in());
+                char ch = u8in();
+                if (ext_name_len < (int)sizeof(ext_name) - 1)
+                    ext_name[ext_name_len++] = ch;
+                tag_fprintf(stderr, "%c", ch);
                 asize--;
                 dsize--;
             }
+            ext_name[ext_name_len] = '\0';
+
             while (spc--)
-                fprintf(stderr, " ");
-            fprintf(stderr, ":   ");
+                tag_fprintf(stderr, " ");
+            tag_fprintf(stderr, ":   ");
             if (asize >= 8)
             {
                 dsize = u32in() - 8;
@@ -773,17 +784,44 @@ static int ilstin(int size)
                 asize -= 4;
                 if (memcmp(id, "data", 4))
                     goto skip;
-                u32in();
+                u32in(); // type/flags
+                asize -= 4;
+                dsize -= 4;
+                u32in(); // locale/reserved
                 asize -= 4;
                 dsize -= 4;
             }
+            int ext_data_len = 0;
             while (dsize > 0)
             {
-                fprintf(stderr, "%c",u8in());
+                char ch = u8in();
+                if (ext_data_len < (int)sizeof(ext_data) - 1)
+                    ext_data[ext_data_len++] = ch;
+                tag_fprintf(stderr, "%c", ch);
                 asize--;
                 dsize--;
             }
-            fprintf(stderr, "\n");
+            ext_data[ext_data_len] = '\0';
+            tag_fprintf(stderr, "\n");
+
+            if (strcmp(ext_name, "iTunSMPB") == 0 || strstr(ext_data, "iTunSMPB") != NULL)
+            {
+                char *smpb = strstr(ext_data, "iTunSMPB");
+                if (!smpb) smpb = ext_data;
+                uint32_t dummy = 0, delay = 0, padding = 0;
+                uint64_t valid_samples = 0;
+                if (sscanf(smpb, "iTunSMPB %x %x %x %llx", &dummy, &delay, &padding, (unsigned long long*)&valid_samples) >= 4 ||
+                    sscanf(smpb, "%x %x %x %llx", &dummy, &delay, &padding, (unsigned long long*)&valid_samples) >= 4)
+                {
+                    if (!mp4config.has_gapless_info && !mp4config.has_elst)
+                    {
+                        mp4config.gapless_delay = delay;
+                        mp4config.gapless_padding = padding;
+                        mp4config.gapless_valid_samples = valid_samples;
+                        mp4config.has_gapless_info = 1;
+                    }
+                }
+            }
 
             goto skip;
         }
@@ -918,7 +956,6 @@ static int parse(uint32_t *sizemax)
         apos = ftell(g_fin);
         if (apos >= (aposmax - 8))
         {
-            fprintf(stderr, "parse error: atom '%s' not found\n", g_atom->name);
             return ERR_FAIL;
         }
         if ((tmp = u32in()) < 8)
@@ -997,14 +1034,19 @@ static int moovin(int sizemax)
         DATA("mvhd", mvhdin),
         STOP()
     };
+    static creator_t edts[] = {
+        NAME("trak"),
+        DESCENT(),
+        NAME("edts"),
+        DESCENT(),
+        DATA("elst", elstin),
+        STOP()
+    };
+
     static creator_t trak[] = {
         NAME("trak"),
         DESCENT(),
         NAME("tkhd"),
-        NAME("edts"),
-        DESCENT(),
-        DATA("elst", elstin),
-        ASCENT(),
         NAME("mdia"),
         DESCENT(),
         DATA("mdhd", mdhdin),
@@ -1035,6 +1077,12 @@ static int moovin(int sizemax)
         g_atom = old_atom;
         return ERR_FAIL;
     }
+
+    fseek(g_fin, apos, SEEK_SET);
+
+    g_atom = edts;
+    atomsize = sizemax + apos - ftell(g_fin);
+    parse(&atomsize); /* optional edts atom */
 
     fseek(g_fin, apos, SEEK_SET);
 
@@ -1208,19 +1256,16 @@ int mp4read_open(char *name)
         fprintf(stderr, "********************\n");
     }
 
-    if (mp4config.verbose.tags)
+    rewind(g_fin);
+    g_atom = g_meta1;
+    atomsize = INT_MAX;
+    ret = parse(&atomsize);
+    if (ret < 0)
     {
         rewind(g_fin);
-        g_atom = g_meta1;
+        g_atom = g_meta2;
         atomsize = INT_MAX;
         ret = parse(&atomsize);
-        if (ret < 0)
-        {
-            rewind(g_fin);
-            g_atom = g_meta2;
-            atomsize = INT_MAX;
-            ret = parse(&atomsize);
-        }
     }
 
     return ERR_OK;

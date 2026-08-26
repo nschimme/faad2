@@ -427,7 +427,7 @@ static void usage(void)
     faad_fprintf(stdout, "        23: LD (Low Delay) object type.\n");
     faad_fprintf(stdout, " -d    Down matrix 5.1 to 2 channels\n");
     faad_fprintf(stdout, " -w    Write output to stdio instead of a file.\n");
-    faad_fprintf(stdout, " -g    Disable gapless decoding.\n");
+    faad_fprintf(stdout, " -g    Disable gapless decoding (--no-gapless).\n");
     faad_fprintf(stdout, " -q    Quiet - suppresses status messages.\n");
     faad_fprintf(stdout, " -j X  Jump - start output X seconds into track (MP4 files only).\n");
     faad_fprintf(stdout, "Example:\n");
@@ -1118,7 +1118,8 @@ static int faad_main(int argc, char *argv[])
             { "downmix",    0, 0, 'd' },
             { "info",       0, 0, 'i' },
             { "stdio",      0, 0, 'w' },
-            { "stdio",      0, 0, 'g' },
+            { "no-gapless", 0, 0, 'g' },
+            { "nogapless",  0, 0, 'g' },
             { "seek",       1, 0, 'j' },
             { "help",       0, 0, 'h' },
             { 0, 0, 0, 0 }
