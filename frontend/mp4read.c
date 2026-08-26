@@ -139,22 +139,94 @@ static char *mp4time(time_t t)
     return ctime(&t);
 }
 
+static int mvhdin(int size)
+{
+    uint8_t version = u8in();
+    // flags (3 bytes)
+    u8in(); u8in(); u8in();
+
+    if (version == 1)
+    {
+        // 64-bit creation and modification times
+        u32in(); u32in();
+        u32in(); u32in();
+        mp4config.mvhd_timescale = u32in();
+        u32in(); u32in(); // 64-bit duration
+    }
+    else
+    {
+        // 32-bit creation and modification times
+        u32in();
+        u32in();
+        mp4config.mvhd_timescale = u32in();
+        u32in(); // 32-bit duration
+    }
+
+    return size;
+}
+
 static int mdhdin(int size)
 {
-    // version/flags
-    u32in();
-    // Creation time
-    mp4config.ctime = u32in();
-    // Modification time
-    mp4config.mtime = u32in();
-    // Time scale
-    mp4config.samplerate = u32in();
-    // Duration
-    mp4config.samples = u32in();
-    // Language
+    uint8_t version = u8in();
+    // flags (3 bytes)
+    u8in(); u8in(); u8in();
+
+    if (version == 1)
+    {
+        u32in(); u32in(); // creation time
+        u32in(); u32in(); // modification time
+        mp4config.samplerate = u32in();
+        uint64_t dur_hi = u32in();
+        uint64_t dur_lo = u32in();
+        uint64_t dur64 = (dur_hi << 32) | dur_lo;
+        mp4config.samples = (dur64 > UINT32_MAX) ? UINT32_MAX : (uint32_t)dur64;
+    }
+    else
+    {
+        mp4config.ctime = u32in();
+        mp4config.mtime = u32in();
+        mp4config.samplerate = u32in();
+        mp4config.samples = u32in();
+    }
+    // Language & pre_defined
     u16in();
-    // pre_defined
     u16in();
+
+    return size;
+}
+
+static int elstin(int size)
+{
+    uint8_t version = u8in();
+    // flags (3 bytes)
+    u8in(); u8in(); u8in();
+
+    uint32_t entry_count = u32in();
+    if (entry_count > 0 && !mp4config.has_elst)
+    {
+        uint64_t segment_duration = 0;
+        int64_t media_time = 0;
+
+        if (version == 1)
+        {
+            uint64_t dur_hi = u32in();
+            uint64_t dur_lo = u32in();
+            segment_duration = (dur_hi << 32) | dur_lo;
+
+            uint64_t time_hi = u32in();
+            uint64_t time_lo = u32in();
+            media_time = (int64_t)((time_hi << 32) | time_lo);
+        }
+        else
+        {
+            segment_duration = u32in();
+            media_time = (int32_t)u32in();
+        }
+
+        mp4config.elst_media_time = media_time;
+        mp4config.elst_segment_duration = segment_duration;
+        mp4config.has_elst = 1;
+    }
 
     return size;
 }
@@ -723,10 +795,40 @@ static int ilstin(int size)
         switch(type)
         {
         case 1:
-            while (asize > 0)
             {
-                fprintf(stderr, "%c",u8in());
-                asize--;
+                char val_buf[512];
+                int val_len = 0;
+                while (asize > 0)
+                {
+                    char ch = u8in();
+                    if (val_len < (int)sizeof(val_buf) - 1)
+                        val_buf[val_len++] = ch;
+                    asize--;
+                }
+                val_buf[val_len] = '\0';
+                fprintf(stderr, "%s", val_buf);
+
+                if (cnt < sizeof(tags)/sizeof(tags[0]) && tags[cnt].id && memcmp(tags[cnt].id, "----", 4) == 0)
+                {
+                    // Check for iTunSMPB metadata tag for Apple iTunes gapless fallback
+                    char *smpb = strstr(val_buf, "iTunSMPB");
+                    if (smpb)
+                    {
+                        uint32_t dummy, delay = 0, padding = 0;
+                        uint64_t valid_samples = 0;
+                        if (sscanf(smpb, "iTunSMPB %x %x %x %llx", &dummy, &delay, &padding, (unsigned long long*)&valid_samples) >= 4 ||
+                            sscanf(smpb, "%x %x %x %llx", &dummy, &delay, &padding, (unsigned long long*)&valid_samples) >= 4)
+                        {
+                            if (!mp4config.has_gapless_info && !mp4config.has_elst)
+                            {
+                                mp4config.gapless_delay = delay;
+                                mp4config.gapless_padding = padding;
+                                mp4config.gapless_valid_samples = valid_samples;
+                                mp4config.has_gapless_info = 1;
+                            }
+                        }
+                    }
+                }
             }
             break;
         case 0:
@@ -892,13 +994,17 @@ static int moovin(int sizemax)
     int err, ret = sizemax;
 
     static creator_t mvhd[] = {
-        NAME("mvhd"),
+        DATA("mvhd", mvhdin),
         STOP()
     };
     static creator_t trak[] = {
         NAME("trak"),
         DESCENT(),
         NAME("tkhd"),
+        NAME("edts"),
+        DESCENT(),
+        DATA("elst", elstin),
+        ASCENT(),
         NAME("mdia"),
         DESCENT(),
         DATA("mdhd", mdhdin),
@@ -1058,6 +1164,7 @@ int mp4read_open(char *name)
     int ret;
 
     mp4read_close();
+    memset(&mp4config, 0, sizeof(mp4config_t));
 
     g_fin = faad_fopen(name, "rb");
     if (!g_fin)
@@ -1076,6 +1183,17 @@ int mp4read_open(char *name)
     {
         fprintf(stderr, "parse:%d\n", ret);
         goto err;
+    }
+
+    if (mp4config.has_elst)
+    {
+        if (mp4config.elst_media_time >= 0 && mp4config.samplerate > 0 && mp4config.mvhd_timescale > 0)
+        {
+            mp4config.gapless_delay = (uint32_t)mp4config.elst_media_time;
+            double valid_dur_samples = (double)mp4config.elst_segment_duration * (double)mp4config.samplerate / (double)mp4config.mvhd_timescale;
+            mp4config.gapless_valid_samples = (uint64_t)(valid_dur_samples + 0.5);
+            mp4config.has_gapless_info = 1;
+        }
     }
 
     // alloc frame buffer
