@@ -224,6 +224,11 @@ static int elstin(int size)
             media_time = (int32_t)u32in();
         }
 
+        /*
+         * ISO/IEC 14496-12 Section 8.6.6: media_time is expressed in media (mdhd) timescale,
+         * which for audio tracks matches sample rate. Thus elst_media_time directly represents
+         * the audio priming delay in sample frames.
+         */
         mp4config.elst_media_time = media_time;
         mp4config.elst_segment_duration = segment_duration;
         mp4config.has_elst = 1;
@@ -594,6 +599,7 @@ static int hdlr2in(int size)
     uint8_t buf[4];
     int original_size = size;
 
+    /* 12 bytes = 4 bytes version/flags + 4 bytes pre_defined + 4 bytes handler type */
     if (size < 12)
         return ERR_FAIL;
 
@@ -601,7 +607,7 @@ static int hdlr2in(int size)
     u32in();
     // Predefined
     u32in();
-    // Handler type
+    // Handler type: ISOBMFF metadata containers use 'mdir' (iTunes metadata) or 'mdta' (Apple keys)
     datain(buf, 4);
     if (memcmp(buf, "mdir", 4) && memcmp(buf, "mdta", 4))
         return ERR_FAIL;
@@ -613,6 +619,7 @@ static int hdlr2in(int size)
         size--;
     }
 
+    /* Return original consumed payload size so atom parser maintains correct offsets */
     return original_size;
 }
 
@@ -740,6 +747,12 @@ static int ilstin(int size)
             char ext_name[256] = {0};
             char ext_data[512] = {0};
 
+            /*
+             * ISOBMFF freeform ('----') metadata atoms contain three child sub-atoms:
+             *   1) 'mean': Naming domain string (e.g., "com.apple.iTunes")
+             *   2) 'name': Tag key string (e.g., "iTunSMPB")
+             *   3) 'data': Typed payload (8-byte header: 4-byte FullBox flags + 4-byte locale)
+             */
             while (asize >= 8)
             {
                 uint32_t sub_size = u32in();
@@ -762,9 +775,10 @@ static int ilstin(int size)
                 }
                 else if (memcmp(sub_id, "name", 4) == 0)
                 {
+                    /* Skip 4-byte FullBox version/flags header */
                     if (sub_payload_len >= 4 && asize >= 4)
                     {
-                        u32in(); // version/flags
+                        u32in();
                         asize -= 4;
                         sub_payload_len -= 4;
                     }
@@ -781,10 +795,11 @@ static int ilstin(int size)
                 }
                 else if (memcmp(sub_id, "data", 4) == 0)
                 {
+                    /* Skip 8-byte data header: 4-byte type/flags + 4-byte locale/reserved */
                     if (sub_payload_len >= 8 && asize >= 8)
                     {
-                        u32in(); // version/flags
-                        u32in(); // locale
+                        u32in();
+                        u32in();
                         asize -= 8;
                         sub_payload_len -= 8;
                     }
@@ -1227,6 +1242,7 @@ int mp4read_open(char *name)
         if (mp4config.elst_media_time >= 0 && mp4config.samplerate > 0 && mp4config.mvhd_timescale > 0)
         {
             mp4config.gapless_delay = (uint32_t)mp4config.elst_media_time;
+            /* Convert elst segment_duration (in movie timescale, mvhd) to exact audio sample frames (at track sample rate) */
             double valid_dur_samples = (double)mp4config.elst_segment_duration * (double)mp4config.samplerate / (double)mp4config.mvhd_timescale;
             mp4config.gapless_valid_samples = (uint64_t)(valid_dur_samples + 0.5);
             mp4config.has_gapless_info = 1;
