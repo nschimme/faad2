@@ -224,11 +224,7 @@ static int elstin(int size)
             media_time = (int32_t)u32in();
         }
 
-        /*
-         * ISO/IEC 14496-12 Section 8.6.6: media_time is expressed in media (mdhd) timescale,
-         * which for audio tracks matches sample rate. Thus elst_media_time directly represents
-         * the audio priming delay in sample frames.
-         */
+        /* elst_media_time is in media (sample rate) timescale = priming delay in samples */
         mp4config.elst_media_time = media_time;
         mp4config.elst_segment_duration = segment_duration;
         mp4config.has_elst = 1;
@@ -599,7 +595,7 @@ static int hdlr2in(int size)
     uint8_t buf[4];
     int original_size = size;
 
-    /* 12 bytes = 4 bytes version/flags + 4 bytes pre_defined + 4 bytes handler type */
+    /* 12 bytes = version/flags (4) + pre_defined (4) + handler type (4) */
     if (size < 12)
         return ERR_FAIL;
 
@@ -747,12 +743,7 @@ static int ilstin(int size)
             char ext_name[256] = {0};
             char ext_data[512] = {0};
 
-            /*
-             * ISOBMFF freeform ('----') metadata atoms contain three child sub-atoms:
-             *   1) 'mean': Naming domain string (e.g., "com.apple.iTunes")
-             *   2) 'name': Tag key string (e.g., "iTunSMPB")
-             *   3) 'data': Typed payload (8-byte header: 4-byte FullBox flags + 4-byte locale)
-             */
+            /* Parse 'mean', 'name', and 'data' sub-atoms inside '----' freeform tag */
             while (asize >= 8)
             {
                 uint32_t sub_size = u32in();
@@ -1242,7 +1233,7 @@ int mp4read_open(char *name)
         if (mp4config.elst_media_time >= 0 && mp4config.samplerate > 0 && mp4config.mvhd_timescale > 0)
         {
             mp4config.gapless_delay = (uint32_t)mp4config.elst_media_time;
-            /* Convert elst segment_duration (in movie timescale, mvhd) to exact audio sample frames (at track sample rate) */
+            /* Convert segment_duration (movie timescale) to audio sample frames */
             double valid_dur_samples = (double)mp4config.elst_segment_duration * (double)mp4config.samplerate / (double)mp4config.mvhd_timescale;
             mp4config.gapless_valid_samples = (uint64_t)(valid_dur_samples + 0.5);
             mp4config.has_gapless_info = 1;
