@@ -920,6 +920,7 @@ static int decodeMP4file(char *mp4file, char *sndfile, char *adts_fn, int to_std
     mp4read_seek(startSampleId);
     for (sampleId = startSampleId; sampleId < mp4config.frame.nsamples; sampleId++)
     {
+
         if (mp4read_frame())
             break;
 
