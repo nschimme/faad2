@@ -844,29 +844,7 @@ static int ilstin(int size)
                     asize--;
                 }
                 val_buf[val_len] = '\0';
-                fprintf(stderr, "%s", val_buf);
-
-                if (cnt < sizeof(tags)/sizeof(tags[0]) && tags[cnt].id && memcmp(tags[cnt].id, "----", 4) == 0)
-                {
-                    // Check for iTunSMPB metadata tag for Apple iTunes gapless fallback
-                    char *smpb = strstr(val_buf, "iTunSMPB");
-                    if (smpb)
-                    {
-                        uint32_t dummy, delay = 0, padding = 0;
-                        uint64_t valid_samples = 0;
-                        if (sscanf(smpb, "iTunSMPB %x %x %x %llx", &dummy, &delay, &padding, (unsigned long long*)&valid_samples) >= 4 ||
-                            sscanf(smpb, "%x %x %x %llx", &dummy, &delay, &padding, (unsigned long long*)&valid_samples) >= 4)
-                        {
-                            if (!mp4config.has_gapless_info && !mp4config.has_elst)
-                            {
-                                mp4config.gapless_delay = delay;
-                                mp4config.gapless_padding = padding;
-                                mp4config.gapless_valid_samples = valid_samples;
-                                mp4config.has_gapless_info = 1;
-                            }
-                        }
-                    }
-                }
+                tag_fprintf(stderr, "%s", val_buf);
             }
             break;
         case 0:
