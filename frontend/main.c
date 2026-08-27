@@ -892,7 +892,7 @@ static int decodeMP4file(char *mp4file, char *sndfile, char *adts_fn, int to_std
     {
         if (mp4config.has_gapless_info)
         {
-            /* Subtract 1024 samples absorbed by decoder initialization from priming delay */
+            /* FAAD2's IMDCT engine absorbs 1024 samples during init overlap-add */
             if (mp4config.gapless_delay > 1024)
                 net_start_trim = mp4config.gapless_delay - 1024;
             else
