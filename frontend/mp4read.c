@@ -742,6 +742,7 @@ static int ilstin(int size)
         {
             char ext_name[256] = {0};
             char ext_data[512] = {0};
+            printf("[ENTRY id='%s' dsize=%d asize=%d]\n", id, dsize, asize);
 
             /* Parse 'mean', 'name', and 'data' sub-atoms inside '----' freeform tag */
             while (asize >= 8)
@@ -804,6 +805,7 @@ static int ilstin(int size)
                         sub_payload_len--;
                     }
                     ext_data[ext_data_len] = '\0';
+                    printf("[GOT EXT_NAME='%s']\n", ext_name);
                 }
                 else
                 {
