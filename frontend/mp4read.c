@@ -742,18 +742,16 @@ static int ilstin(int size)
         {
             char ext_name[256] = {0};
             char ext_data[512] = {0};
-            printf("[ENTRY id='%s' dsize=%d asize=%d]\n", id, dsize, asize);
+            uint32_t sub_size = dsize;
+            uint8_t sub_id[5];
+            memcpy(sub_id, id, 4);
+            sub_id[4] = 0;
 
             /* Parse 'mean', 'name', and 'data' sub-atoms inside '----' freeform tag */
-            while (asize >= 8)
+            while (1)
             {
-                uint32_t sub_size = u32in();
-                uint8_t sub_id[5] = {0};
-                if (sub_size < 8 || (asize >= 8 && sub_size - 8 > (uint32_t)(asize - 8)))
+                if (sub_size < 8)
                     break;
-                asize -= 8;
-                if (datain(sub_id, 4) < 4)
-                    return ERR_FAIL;
                 uint32_t sub_payload_len = sub_size - 8;
 
                 if (memcmp(sub_id, "mean", 4) == 0)
@@ -805,7 +803,6 @@ static int ilstin(int size)
                         sub_payload_len--;
                     }
                     ext_data[ext_data_len] = '\0';
-                    printf("[GOT EXT_NAME='%s']\n", ext_name);
                 }
                 else
                 {
@@ -816,6 +813,14 @@ static int ilstin(int size)
                         sub_payload_len--;
                     }
                 }
+
+                if (asize < 8)
+                    break;
+                sub_size = u32in();
+                asize -= 4;
+                if (datain(sub_id, 4) < 4)
+                    return ERR_FAIL;
+                asize -= 4;
             }
 
             tag_fprintf(stderr, "%-13s:   %s\n", ext_name[0] ? ext_name : "----", ext_data);
