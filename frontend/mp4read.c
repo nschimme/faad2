@@ -696,7 +696,7 @@ static int ilstin(int size)
     tag_fprintf(stderr, "----------tag list-------------\n");
     while(read < size)
     {
-        int asize, dsize;
+        int asize;
         uint8_t id[5];
         int cnt;
         uint32_t type;
@@ -726,8 +726,7 @@ static int ilstin(int size)
                 tag_fprintf(stderr, "'%s'       :   ", id);
         }
 
-        dsize = u32in();
-        (void)dsize;
+        uint32_t sub_size = u32in();
         asize -= 4;
         if (datain(id, 4) < 4)
             return ERR_FAIL;
@@ -742,7 +741,6 @@ static int ilstin(int size)
         {
             char ext_name[256] = {0};
             char ext_data[512] = {0};
-            uint32_t sub_size = dsize;
             uint8_t sub_id[5];
             memcpy(sub_id, id, 4);
             sub_id[4] = 0;
