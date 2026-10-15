@@ -25,7 +25,23 @@ The output format and downMatrix setting are fixed when the decoder is
 initialized (NeAACDecInit/NeAACDecInit2); a change made later applies at the
 next NeAACDecPostSeekReset or NeAACDecInit.
 
-Dynamic range control is applied as in FAAD2: full compression, and streams
-that carry a programme reference level are normalised to -20 dBFS. Streams that
-carry compression data but no programme reference level are not attenuated by
-20 dB, which FAAD2 did.
+Dynamic range control is applied exactly as FAAD2 did (Debian builds it in by
+default): full compression, and streams that carry a programme reference level
+are normalised to -20 dBFS. A stream that carries dynamic_range_info but no
+programme reference level is played 20 dB quieter, as before; callers may have
+worked around that.
+
+Compatibility and migration
+---------------------------
+
+Programs that call this API keep their FAAD2 behaviour, including its quirks:
+the first decoded frame reports no samples, channels come in bitstream order
+with FAAD2 positions, the 5/6-channel downmix and the error numbers are
+unchanged, a decode call searches up to 768 bytes for an ADTS syncword, and the
+output format and downMatrix settings are read when the decoder initialises.
+The differences are listed above and in the ChangeLog.
+
+New code should use libfaad3 (faad3.h) directly. It reports the PCM format it
+really emits, returns concealed audio with flags instead of errors, has a
+stable struct-size-checked ABI, and drops these quirks. The porting guide in
+libfaad3's docs/libfaad.md lists every legacy behaviour and its replacement.

@@ -6,8 +6,8 @@ Next release:
 	  and raw AAC without ASC. Ignore useOldADTSFormat and
 	  dontUpSampleImplicitSBR; InitDRM remains exported but reports failure.
 	* Apply dynamic range control and programme level normalisation as before,
-	  except that streams without a programme reference level are no longer
-	  attenuated by 20 dB.
+	  including the 20 dB attenuation of streams without a programme reference
+	  level.
 	* Report LC-only streams at or below 24 kHz at their real sample rate,
 	  without upsampling to twice the rate.
 

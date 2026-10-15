@@ -22,6 +22,7 @@
 
 #define SHIM_MAX_CHANNELS 64
 #define SYNC_SEARCH 768
+#define DRC_TARGET 80   /* quarter-dB below full scale, i.e. -20 dBFS */
 
 /* FAAD2 error numbers; the strings are indexed by number. */
 enum {
@@ -197,7 +198,7 @@ static faad_status shim_open_dec(const shim_t *s, enum faad_stream_format stream
     /* FAAD2 applies the full compression and normalises to -20 dBFS. */
     cfg.drc_cut = 127;
     cfg.drc_boost = 127;
-    cfg.drc_target_level = 80;
+    cfg.drc_target_level = DRC_TARGET;
     return faad_decoder_open(&cfg, asc, asc_len, dec);
 }
 
@@ -502,6 +503,21 @@ static unsigned char map_status(faad_status st)
     }
 }
 
+/* FAAD2 normalised a stream that carries DRC data but no programme reference
+ * level as if the reference were 0 dBFS, so those streams came out 20 dB quieter.
+ * Callers may have worked around that, so it is reproduced. */
+static void attenuate_missing_reference(void *pcm, pcm_type t, size_t count)
+{
+    const float g = exp2f(-(float)DRC_TARGET / 24.0f);
+    size_t i;
+
+    for (i = 0; i < count; i++) {
+        if (t == T_I16) ((int16_t *)pcm)[i] = (int16_t)lrintf(((int16_t *)pcm)[i] * g);
+        else if (t == T_I32) ((int32_t *)pcm)[i] = (int32_t)lrintf(((int32_t *)pcm)[i] * g);
+        else ((float *)pcm)[i] *= g;
+    }
+}
+
 static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, unsigned long size,
                          void *dest, unsigned long dest_size)
 {
@@ -570,6 +586,8 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
     n = info.channels;
     esz = s->type == T_I16 ? 2 : 4;
     frames = wr / (uint32_t)(esz * n);
+    if ((flags & FAAD_FRAME_DRC_INFO) && !info.prog_ref_level_present)
+        attenuate_missing_reference(s->pcm, s->type, (size_t)frames * n);
     downmix = s->downmix_on && (n == 5 || n == 6);
     out_ch = downmix ? 2 : n;
     moved = build_perm(info.channel_mask, n, perm, pos);

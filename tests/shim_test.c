@@ -509,9 +509,9 @@ static void junk_test(const Input *in)
 
 /* A stream carrying a programme reference level of -23 dB and compression
  * data: FAAD2 normalised it to -20 dBFS, which measured -20.88 dB RMS here. */
-static void drc_test(const char *dir)
+static void drc_level(const char *dir, const char *name, double lo, double hi)
 {
-    Input in = load(dir, "drc_ref23.aac");
+    Input in = load(dir, name);
     NeAACDecHandle h = NeAACDecOpen();
     NeAACDecConfigurationPtr cfg = NeAACDecGetCurrentConfiguration(h);
     NeAACDecFrameInfo fi;
@@ -530,10 +530,18 @@ static void drc_test(const char *dir)
         for (k = 0; f && k < fi.samples; k++, n++) sum += (double)f[k] * f[k];
     }
     rms = 20.0 * log10(sqrt(sum / (double)n));
-    CHECK(rms > -21.2 && rms < -20.6);
+    CHECK(rms > lo && rms < hi);
     NeAACDecClose(h);
     free(in.frames);
     free(in.data);
+}
+
+static void drc_test(const char *dir)
+{
+    drc_level(dir, "drc_ref23.aac", -21.2, -20.6);
+    /* dynamic_range_info without a programme reference level: FAAD2 treated the
+     * missing level as 0 dBFS and played the stream 20 dB too quietly. */
+    drc_level(dir, "drc_noref.aac", -41.8, -41.1);
 }
 
 int main(int argc, char **argv)
