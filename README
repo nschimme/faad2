@@ -52,7 +52,10 @@ Known differences from FAAD2:
   but not always the same one as FAAD2.
 - 32-bit output clamps at positive full scale instead of wrapping.
 - Samples differ at the level of decoder arithmetic (about 50 dB agreement
-  between any two AAC decoders on noise-substituted content).
+  between any two AAC decoders on noise-substituted content). HE-AAC output
+  agrees with FAAD2 only to about 20 dB, as it does between any two decoders:
+  the high band is regenerated, so it matches in level and shape, not sample
+  for sample.
 - Main/LTP/SSR/LD/ER profiles, DRM, fixed-point, LATM, ADIF and raw AAC without
   an AudioSpecificConfig are not supported; useOldADTSFormat and
   dontUpSampleImplicitSBR are ignored.
