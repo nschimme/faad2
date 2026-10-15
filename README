@@ -25,6 +25,7 @@ The output format and downMatrix setting are fixed when the decoder is
 initialized (NeAACDecInit/NeAACDecInit2); a change made later applies at the
 next NeAACDecPostSeekReset or NeAACDecInit.
 
-Dynamic range control is not applied (stock FAAD2 normalised the level of
-streams carrying DRC data by default). Streams that carry no DRC data decode
-the same.
+Dynamic range control is applied as in FAAD2: full compression, and streams
+that carry a programme reference level are normalised to -20 dBFS. Streams that
+carry compression data but no programme reference level are not attenuated by
+20 dB, which FAAD2 did.

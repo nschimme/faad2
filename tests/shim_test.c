@@ -507,6 +507,35 @@ static void junk_test(const Input *in)
     free(buf);
 }
 
+/* A stream carrying a programme reference level of -23 dB and compression
+ * data: FAAD2 normalised it to -20 dBFS, which measured -20.88 dB RMS here. */
+static void drc_test(const char *dir)
+{
+    Input in = load(dir, "drc_ref23.aac");
+    NeAACDecHandle h = NeAACDecOpen();
+    NeAACDecConfigurationPtr cfg = NeAACDecGetCurrentConfiguration(h);
+    NeAACDecFrameInfo fi;
+    unsigned long rate;
+    unsigned char ch;
+    double sum = 0.0, rms;
+    size_t i = 0, n = 0, k;
+
+    cfg->outputFormat = FAAD_FMT_FLOAT;
+    CHECK(NeAACDecSetConfiguration(h, cfg) == 1);
+    CHECK(NeAACDecInit(h, in.data, in.size, &rate, &ch) == 0);
+    while (i < in.size) {
+        const float *f = NeAACDecDecode(h, &fi, in.data + i, in.size - i);
+        if (fi.error) break;
+        i += fi.bytesconsumed;
+        for (k = 0; f && k < fi.samples; k++, n++) sum += (double)f[k] * f[k];
+    }
+    rms = 20.0 * log10(sqrt(sum / (double)n));
+    CHECK(rms > -21.2 && rms < -20.6);
+    NeAACDecClose(h);
+    free(in.frames);
+    free(in.data);
+}
+
 int main(int argc, char **argv)
 {
     static const char *names[] = {"stereo44_lc.aac", "surround51_lc.aac", "stereo32_he.aac", "mono24_lc.aac"};
@@ -528,6 +557,7 @@ int main(int argc, char **argv)
     context = "mid-stream downmix"; downmix_midstream_test(&inputs[1]);
     context = "DAB+"; dab_test(argv[1]);
     context = "junk and false syncs"; junk_test(&inputs[0]);
+    context = "DRC"; drc_test(argv[1]);
     for (i = 0; i < 4; i++) { free(inputs[i].frames); free(inputs[i].data); }
     if (failures) fprintf(stderr, "%u checks failed\n", failures);
     else puts("All shim checks passed");

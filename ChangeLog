@@ -5,7 +5,9 @@ Next release:
 	* Drop Main/LTP/SSR/LD/ER profiles, DRM, fixed-point decoding, LATM, ADIF,
 	  and raw AAC without ASC. Ignore useOldADTSFormat and
 	  dontUpSampleImplicitSBR; InitDRM remains exported but reports failure.
-	* Do not apply dynamic range control.
+	* Apply dynamic range control and programme level normalisation as before,
+	  except that streams without a programme reference level are no longer
+	  attenuated by 20 dB.
 	* Report LC-only streams at or below 24 kHz at their real sample rate,
 	  without upsampling to twice the rate.
 

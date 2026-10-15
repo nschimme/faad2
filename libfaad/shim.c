@@ -194,6 +194,10 @@ static faad_status shim_open_dec(const shim_t *s, enum faad_stream_format stream
     (void)s;
     cfg.stream_format = stream;
     cfg.output_format = faad3_format(type);
+    /* FAAD2 applies the full compression and normalises to -20 dBFS. */
+    cfg.drc_cut = 127;
+    cfg.drc_boost = 127;
+    cfg.drc_target_level = 80;
     return faad_decoder_open(&cfg, asc, asc_len, dec);
 }
 
