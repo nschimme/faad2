@@ -39,7 +39,20 @@ the first decoded frame reports no samples, channels come in bitstream order
 with FAAD2 positions, the 5/6-channel downmix and the error numbers are
 unchanged, a decode call searches up to 768 bytes for an ADTS syncword, and the
 output format and downMatrix settings are read when the decoder initialises.
-The differences are listed above and in the ChangeLog.
+Known differences from FAAD2:
+- LC-only streams at or below 24 kHz are reported and emitted at their real
+  rate; FAAD2 doubled the rate and upsampled them.
+- For implicit SBR in a raw/MP4 configuration at or below 24 kHz, NeAACDecInit2
+  reports the core rate; the frames carry the doubled rate (ADTS is reported
+  correctly). Use explicit signalling, or read the rate from the frames.
+- A corrupt or false-sync ADTS frame yields an error number from the same table
+  but not always the same one as FAAD2.
+- 32-bit output clamps at positive full scale instead of wrapping.
+- Samples differ at the level of decoder arithmetic (about 50 dB agreement
+  between any two AAC decoders on noise-substituted content).
+- Main/LTP/SSR/LD/ER profiles, DRM, fixed-point, LATM, ADIF and raw AAC without
+  an AudioSpecificConfig are not supported; useOldADTSFormat and
+  dontUpSampleImplicitSBR are ignored.
 
 New code should use libfaad3 (faad3.h) directly. It reports the PCM format it
 really emits, returns concealed audio with flags instead of errors, has a

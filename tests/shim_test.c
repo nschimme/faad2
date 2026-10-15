@@ -295,7 +295,7 @@ static void corrupt_test(const Input *in)
     memset(bad + f.header, 0, f.size - f.header);
     h = open_input(in, 0, 1, 0, 44100, 2);
     p = NeAACDecDecode(h, &fi, bad, (unsigned long)f.size);
-    CHECK((fi.error != 0 && fi.bytesconsumed > 0) || (p != NULL && fi.error == 0));
+    CHECK((fi.error != 0 && p == NULL && fi.bytesconsumed == 0) || (p != NULL && fi.error == 0)); /* FAAD2 consumed nothing on an error */
     NeAACDecClose(h);
     free(bad);
     h = open_input(in, 0, 1, 0, 44100, 2);

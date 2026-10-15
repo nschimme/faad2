@@ -558,11 +558,10 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
     fi->bytesconsumed = used;
     if (st != FAAD_OK) {
         fi->error = map_status(st);
-        /* FAAD2 consumed nothing on an error and callers then stepped through
-         * the stream; skipping a whole claimed frame would jump over real
+        /* FAAD2 consumed nothing on an error and callers step through the
+         * stream themselves; claiming a frame length could jump over real
          * frames when the header was a false sync. */
-        if (st == FAAD_ERR_DECODE_FAILED && s->stream == FAAD_STREAM_ADTS && used > 1)
-            fi->bytesconsumed = 1;
+        fi->bytesconsumed = 0;
         return NULL;
     }
     if (flags & FAAD_FRAME_CONCEALED) {
@@ -570,8 +569,7 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
          * its callers and their resync logic expect that. The claimed length
          * of a corrupt ADTS frame cannot be trusted either. */
         fi->error = ERR_BITSTREAM;
-        if (s->stream == FAAD_STREAM_ADTS)
-            fi->bytesconsumed = 1;
+        fi->bytesconsumed = 0;
         return NULL;
     }
     s->decoded = 1;
