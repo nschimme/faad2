@@ -224,3 +224,21 @@ if(NOT FAAD_BUNDLED_MODE)
     DESTINATION ${CMAKE_INSTALL_MANDIR}/man3
   )
 endif()  # FAAD_BUNDLED_MODE
+
+# Optional stock oracle; it is never linked into the compatibility library.
+if(FAAD_BUILD_TESTS)
+  add_executable(diff_shim tests/diff/runner.c)
+  target_link_libraries(diff_shim PRIVATE faad)
+  set(FAAD2_ORACLE_ROOT "" CACHE PATH "Stock FAAD2 2.11.4 installation for differential tests")
+  if(FAAD2_ORACLE_ROOT)
+    find_library(FAAD2_ORACLE_LIBRARY NAMES faad PATHS "${FAAD2_ORACLE_ROOT}/lib" NO_DEFAULT_PATH REQUIRED)
+    add_executable(diff_oracle tests/diff/runner.c)
+    target_include_directories(diff_oracle PRIVATE "${FAAD2_ORACLE_ROOT}/include")
+    target_link_libraries(diff_oracle PRIVATE "${FAAD2_ORACLE_LIBRARY}")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME shim_differential COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/diff/compare.py"
+      $<TARGET_FILE:diff_shim> $<TARGET_FILE:diff_oracle>
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
+  endif()
+endif()

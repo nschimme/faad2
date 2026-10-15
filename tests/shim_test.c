@@ -1,6 +1,7 @@
 /* Public FAAD2 API regression tests. Fixtures are deliberately kept verbatim. */
 #include "neaacdec.h"
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -554,6 +555,66 @@ static void drc_test(const char *dir)
     drc_level(dir, "drc_noref.aac", -41.8, -41.1);
 }
 
+
+/* LP64 constants measured with stock 2.11.4; ILP32 follows its uchar,
+ * ushort and ulong fields with 1, 2 and 4-byte alignment respectively. */
+static void layout_test(void)
+{
+    if (sizeof(void *) == 8 && sizeof(unsigned long) == 8) {
+#include "diff/layout64.inc"
+    }
+    if (sizeof(void *) == 4 && sizeof(unsigned long) == 4) {
+#include "diff/layout32.inc"
+    }
+}
+
+static void extended_test(const Input *in, unsigned long rate, unsigned channels)
+{
+    NeAACDecHandle h = NeAACDecOpen();
+    unsigned char asc[2], ch;
+    unsigned long sr;
+    size_t pass, i, c;
+    asc_for(in, asc);
+    for (pass = 0; pass < 3; pass++) {
+        if (pass == 1) EQ(NeAACDecInit2(h, asc, 2, &sr, &ch), 0);
+        else EQ(NeAACDecInit(h, in->data, in->size, &sr, &ch), 0);
+        /* FAAD2 reported 7.1 as two channels (ADTS) or the configuration index 7 at Init. */
+        EQ(sr, rate); EQ(ch, channels == 8 ? (pass == 1 ? 7 : 2) : channels);
+        for (i = 0; i < in->count; i++) {
+            NeAACDecFrameInfo fi;
+            CHECK(decode(h, in, i, pass == 1, &fi) != NULL);
+            EQ(fi.error, 0); EQ(fi.samples, i ? 1024 * channels : 0);
+            EQ(fi.channels, channels); EQ(fi.samplerate, rate);
+            for (c = 0; c < channels; c++)
+                CHECK(fi.channel_position[c] >= FRONT_CHANNEL_CENTER && fi.channel_position[c] <= LFE_CHANNEL);
+        }
+    }
+    NeAACDecClose(h);
+}
+
+static void uninitialized_test(const Input *in)
+{
+    NeAACDecHandle h = NeAACDecOpen();
+    NeAACDecFrameInfo fi;
+    short pcm[8192];
+    void *dest = pcm;
+    Frame f = in->frames[0];
+    CHECK(NeAACDecDecode(h, &fi, f.data, f.size) == NULL); CHECK(fi.error != 0);
+    CHECK(NeAACDecDecode2(h, &fi, f.data, f.size, &dest, sizeof pcm) == NULL); CHECK(fi.error != 0);
+    NeAACDecPostSeekReset(h, 0);
+    CHECK(NeAACDecDecode(h, &fi, f.data, f.size) == NULL); CHECK(fi.error != 0);
+    NeAACDecClose(h);
+    h = open_input(in, 0, 1, 0, 44100, 2);
+    CHECK(NeAACDecDecode(h, NULL, f.data, f.size) == NULL);
+    CHECK(NeAACDecDecode(h, &fi, NULL, f.size) == NULL); CHECK(fi.error != 0);
+    CHECK(NeAACDecDecode2(h, NULL, f.data, f.size, &dest, sizeof pcm) == NULL);
+    CHECK(NeAACDecDecode2(h, &fi, NULL, f.size, &dest, sizeof pcm) == NULL); CHECK(fi.error != 0);
+    CHECK(NeAACDecDecode2(h, &fi, f.data, f.size, NULL, sizeof pcm) == NULL); CHECK(fi.error != 0);
+    dest = NULL;
+    CHECK(NeAACDecDecode2(h, &fi, f.data, f.size, &dest, sizeof pcm) == NULL); CHECK(fi.error != 0);
+    NeAACDecClose(h); NeAACDecClose(NULL);
+}
+
 int main(int argc, char **argv)
 {
     static const char *names[] = {"stereo44_lc.aac", "surround51_lc.aac", "stereo32_he.aac", "mono24_lc.aac"};
@@ -561,6 +622,17 @@ int main(int argc, char **argv)
     size_t i;
     if (argc != 2) { fprintf(stderr, "usage: %s data-directory\n", argv[0]); return 1; }
     for (i = 0; i < 4; i++) inputs[i] = load(argv[1], names[i]);
+    context = "layout"; layout_test();
+    context = "uninitialized and NULL"; uninitialized_test(&inputs[0]);
+    {
+        static const char *extra[] = {"stereo22_lc.aac", "stereo24_lc.aac", "stereo48_lc.aac", "surround71_lc.aac"};
+        static const unsigned long rates[] = {22050, 24000, 48000, 48000};
+        for (i = 0; i < 4; i++) {
+            Input in = load(argv[1], extra[i]);
+            context = extra[i]; extended_test(&in, rates[i], i == 3 ? 8 : 2);
+            free(in.frames); free(in.data);
+        }
+    }
     context = names[0]; stream_test(&inputs[0], 44100, 2, 0, 1, 0);
     context = names[1]; stream_test(&inputs[1], 44100, 6, 0, 0, 0);
     context = "surround downmix"; stream_test(&inputs[1], 44100, 6, 0, 0, 1);
