@@ -258,7 +258,7 @@ static void hygiene_test(const Input *in)
     cfg.outputFormat = 1; EQ(NeAACDecSetConfiguration(h, &cfg), 1);
     CHECK(decode(h, in, 0, 0, &fi) == NULL); CHECK(fi.error != 0);
     CHECK(NeAACDecInit(h, zeros, sizeof(zeros), &sr, &ch) < 0);
-    CHECK(NeAACDecInit2(h, garbage, 2, &sr, &ch) < 0);
+    CHECK((signed char)NeAACDecInit2(h, garbage, 2, &sr, &ch) < 0); /* plain char is unsigned on ARM Linux */
     asc_for(in, asc);
     EQ(NeAACDecInit2(h, asc, 2, &sr, &ch), 0);
     cfg = *NeAACDecGetCurrentConfiguration(h);
@@ -280,7 +280,7 @@ static void hygiene_test(const Input *in)
     CHECK(NeAACDecGetCapabilities() & LC_DEC_CAP);
     CHECK(NeAACDecAudioSpecificConfig(asc, 2, &info) >= 0);
     EQ(info.samplingFrequency, 44100); EQ(info.channelsConfiguration, 2);
-    CHECK(NeAACDecAudioSpecificConfig(garbage, 2, &info) < 0);
+    CHECK((signed char)NeAACDecAudioSpecificConfig(garbage, 2, &info) < 0);
     NeAACDecClose(NULL);
 }
 
