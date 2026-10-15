@@ -150,8 +150,9 @@ unsigned char NeAACDecSetConfiguration(NeAACDecHandle h, NeAACDecConfigurationPt
         return 0;
     if (c->downMatrix > 1)
         return 0;
-    if (c->outputFormat != s->cfg.outputFormat || c->downMatrix != s->cfg.downMatrix)
-        s->dirty = 1;
+    /* Callers edit the structure returned by GetCurrentConfiguration in place,
+     * so compare with the settings the open decoder uses, not with s->cfg. */
+    s->dirty = c->outputFormat != s->fmt || c->downMatrix != s->downmix_on;
     s->cfg = *c;
     return 1;
 }
@@ -317,8 +318,14 @@ void NeAACDecPostSeekReset(NeAACDecHandle h, long frame)
     shim_t *s = h;
     if (!s)
         return;
-    if (s->dec)
-        faad_decoder_flush(s->dec);
+    /* A seek discards decoder history anyway, so this is where a changed
+     * output format or downmix can take effect mid-stream. */
+    if (s->dec) {
+        if (s->dirty && (s->cfg.outputFormat != s->fmt || s->cfg.downMatrix != s->downmix_on))
+            shim_reopen(s);
+        else
+            faad_decoder_flush(s->dec);
+    }
     if (frame != -1)
         s->frame = frame;
 }

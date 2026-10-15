@@ -20,3 +20,7 @@ without AudioSpecificConfig (ASC) are no longer supported. useOldADTSFormat
 and dontUpSampleImplicitSBR are ignored. LC-only streams at or below 24 kHz
 are reported at their real sample rate and are not upsampled to twice the
 rate. The legacy InitDRM entry point remains exported but reports failure.
+
+The output format and downMatrix setting are fixed when the decoder is
+initialized (NeAACDecInit/NeAACDecInit2); a change made later applies at the
+next NeAACDecPostSeekReset or NeAACDecInit.

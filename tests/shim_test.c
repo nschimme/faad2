@@ -388,6 +388,12 @@ static void downmix_midstream_test(const Input *in)
         }
         if (k >= 2) CHECK(fi.channels == 6 && fi.samples == 6144);
     }
+    /* after a seek the new setting applies */
+    NeAACDecPostSeekReset(h, 0);
+    CHECK(NeAACDecDecode(h, &fi, in->data + i, in->size - i) != NULL);
+    i += fi.bytesconsumed;
+    CHECK(NeAACDecDecode(h, &fi, in->data + i, in->size - i) != NULL);
+    CHECK(fi.channels == 2 && fi.samples == 2048);
     NeAACDecClose(h);
 }
 
