@@ -306,7 +306,9 @@ char NeAACDecInit2(NeAACDecHandle h, unsigned char *pBuffer, unsigned long size,
     if (faad_decoder_get_info(s->dec, &info) != FAAD_OK || !info.format_known)
         return -1;
     *samplerate = info.sample_rate;
-    *channels = (unsigned char)info.channels;
+    /* FAAD2 reported the channels of the core, which is mono for PS streams;
+     * the frames then carry two. */
+    *channels = (unsigned char)(info.object_type == FAAD_OBJ_HE_AAC_V2 ? 1 : info.channels);
     return 0;
 }
 
@@ -367,7 +369,7 @@ char NeAACDecAudioSpecificConfig(unsigned char *pBuffer, unsigned long size,
     /* A PS stream keeps object type 5 here, as signalled by the sync extension. */
     asc->objectTypeIndex = (unsigned char)(info.object_type == FAAD_OBJ_HE_AAC_V2 ? HE_AAC : info.object_type);
     asc->samplingFrequency = info.sample_rate;
-    asc->channelsConfiguration = (unsigned char)info.channels;
+    asc->channelsConfiguration = (unsigned char)(info.object_type == FAAD_OBJ_HE_AAC_V2 ? 1 : info.channels);
     asc->sbr_present_flag = info.object_type != FAAD_OBJ_LC;
     asc->ps_present_flag = info.object_type == FAAD_OBJ_HE_AAC_V2;
     {
