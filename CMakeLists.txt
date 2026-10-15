@@ -104,6 +104,17 @@ if(NOT MSVC)
   target_compile_options(faad PRIVATE -Wall -Wextra -pedantic)
 endif()
 
+option(FAAD_BUILD_TESTS "Build tests" OFF)
+if(FAAD_BUILD_TESTS)
+  enable_testing()
+  add_executable(shim_test tests/shim_test.c)
+  target_link_libraries(shim_test PRIVATE faad)
+  if(NOT WIN32)
+    target_link_libraries(shim_test PRIVATE m)
+  endif()
+  add_test(NAME shim_test COMMAND shim_test "${CMAKE_CURRENT_SOURCE_DIR}/tests/data")
+endif()
+
 # Compile the libFuzzer entry points without requiring a fuzzing runtime.
 option(FAAD_BUILD_FUZZ "Build fuzz entry point object targets" OFF)
 if(FAAD_BUILD_FUZZ)
