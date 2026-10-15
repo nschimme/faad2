@@ -397,6 +397,62 @@ static void downmix_midstream_test(const Input *in)
     NeAACDecClose(h);
 }
 
+/* DAB+ streams: 960-sample granules and the sync-extension HE signalling. */
+static void dab_test(const char *dir)
+{
+    static const struct { const char *name; unsigned ch, out_ch; unsigned long rate, per_frame; int sbr, ps; } v[] = {
+        {"lc_mono32", 1, 1, 32000, 960, 0, 0},
+        {"lc_st48", 2, 2, 48000, 1920, 0, 0},
+        {"he2_st48", 2, 2, 48000, 3840, 1, 1}
+    };
+    size_t k;
+    for (k = 0; k < 3; k++) {
+        char path[512];
+        FILE *f;
+        unsigned char *d;
+        long n, pos;
+        unsigned long rate;
+        unsigned char ch;
+        NeAACDecHandle h = NeAACDecOpen();
+        NeAACDecFrameInfo fi;
+        unsigned frames = 0;
+        uint32_t asc_len;
+
+        snprintf(path, sizeof path, "%s/dab/%s.dab", dir, v[k].name);
+        f = fopen(path, "rb");
+        CHECK(f != NULL);
+        if (!f) { NeAACDecClose(h); continue; }
+        fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET);
+        d = allocate((size_t)n);
+        CHECK(fread(d, 1, (size_t)n, f) == (size_t)n);
+        fclose(f);
+        asc_len = d[0] | d[1] << 8 | d[2] << 16 | (uint32_t)d[3] << 24;
+        CHECK((signed char)NeAACDecInit2(h, d + 4, asc_len, &rate, &ch) == 0);
+        for (pos = 4 + asc_len; pos + 4 <= n; frames++) {
+            uint32_t len = d[pos] | d[pos + 1] << 8 | d[pos + 2] << 16 | (uint32_t)d[pos + 3] << 24;
+            void *o = NeAACDecDecode(h, &fi, d + pos + 4, len);
+            CHECK(o != NULL && fi.error == 0);
+            if (frames == 0) CHECK(fi.samples == 0);
+            else CHECK(fi.samples == v[k].per_frame && fi.channels == v[k].out_ch &&
+                       fi.samplerate == v[k].rate && fi.sbr == v[k].sbr && fi.ps == v[k].ps);
+            pos += 4 + len;
+        }
+        CHECK(frames >= 8);
+        free(d);
+        NeAACDecClose(h);
+    }
+    {
+        /* dablin-style ASC: AOT 2 at the 24 kHz core plus the SBR sync extension */
+        unsigned char asc[] = {0x13, 0x08, 0x56, 0xe5, 0x98};
+        unsigned long rate;
+        unsigned char ch;
+        NeAACDecHandle h = NeAACDecOpen();
+        CHECK((signed char)NeAACDecInit2(h, asc, sizeof asc, &rate, &ch) == 0);
+        CHECK(rate == 48000 && ch == 1);
+        NeAACDecClose(h);
+    }
+}
+
 int main(int argc, char **argv)
 {
     static const char *names[] = {"stereo44_lc.aac", "surround51_lc.aac", "stereo32_he.aac", "mono24_lc.aac"};
@@ -416,6 +472,7 @@ int main(int argc, char **argv)
     context = "corrupt input"; corrupt_test(&inputs[0]);
     context = "resync and config"; resync_and_config_test(&inputs[0]);
     context = "mid-stream downmix"; downmix_midstream_test(&inputs[1]);
+    context = "DAB+"; dab_test(argv[1]);
     for (i = 0; i < 4; i++) { free(inputs[i].frames); free(inputs[i].data); }
     if (failures) fprintf(stderr, "%u checks failed\n", failures);
     else puts("All shim checks passed");

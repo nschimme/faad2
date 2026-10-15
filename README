@@ -24,3 +24,7 @@ rate. The legacy InitDRM entry point remains exported but reports failure.
 The output format and downMatrix setting are fixed when the decoder is
 initialized (NeAACDecInit/NeAACDecInit2); a change made later applies at the
 next NeAACDecPostSeekReset or NeAACDecInit.
+
+Dynamic range control is not applied (stock FAAD2 normalised the level of
+streams carrying DRC data by default). Streams that carry no DRC data decode
+the same.

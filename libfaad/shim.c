@@ -359,7 +359,8 @@ char NeAACDecAudioSpecificConfig(unsigned char *pBuffer, unsigned long size,
     }
     faad_decoder_close(&d);
 
-    asc->objectTypeIndex = (unsigned char)info.object_type;
+    /* A PS stream keeps object type 5 here, as signalled by the sync extension. */
+    asc->objectTypeIndex = (unsigned char)(info.object_type == FAAD_OBJ_HE_AAC_V2 ? HE_AAC : info.object_type);
     asc->samplingFrequency = info.sample_rate;
     asc->channelsConfiguration = (unsigned char)info.channels;
     asc->sbr_present_flag = info.object_type != FAAD_OBJ_LC;
