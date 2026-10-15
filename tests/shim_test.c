@@ -308,6 +308,89 @@ static void corrupt_test(const Input *in)
     NeAACDecClose(h);
 }
 
+/* FAAD2 skips junk before an ADTS syncword inside a single call, and a
+ * configuration change after the first frame must not corrupt later output. */
+static void resync_and_config_test(const Input *in)
+{
+    unsigned char *spliced;
+    size_t junk = 40, cut = 0, i, frames = 0;
+    unsigned long rate;
+    unsigned char ch;
+    NeAACDecHandle h;
+    NeAACDecFrameInfo fi;
+    NeAACDecConfigurationPtr cfg;
+
+    for (i = 0; i < 5 && i < in->count; i++) cut += in->frames[i].size;
+    spliced = allocate(in->size + junk);
+    memcpy(spliced, in->data, cut);
+    memset(spliced + cut, 0x11, junk);
+    memcpy(spliced + cut + junk, in->data + cut, in->size - cut);
+
+    h = NeAACDecOpen();
+    CHECK(NeAACDecInit(h, spliced, in->size + junk, &rate, &ch) == 0);
+    for (i = 0; i < in->size + junk;) {
+        void *o = NeAACDecDecode(h, &fi, spliced + i, in->size + junk - i);
+        CHECK(fi.error == 0);
+        if (fi.error) break;
+        CHECK(o != NULL);
+        i += fi.bytesconsumed;
+        frames++;
+    }
+    CHECK(frames == in->count);
+    NeAACDecClose(h);
+    free(spliced);
+
+    /* configuration changes after the first frame apply from the next Init */
+    h = NeAACDecOpen();
+    CHECK(NeAACDecInit(h, in->data, in->size, &rate, &ch) == 0);
+    CHECK(NeAACDecDecode(h, &fi, in->data, in->size) != NULL);
+    cfg = NeAACDecGetCurrentConfiguration(h);
+    cfg->downMatrix = 1;
+    cfg->outputFormat = FAAD_FMT_FLOAT;
+    CHECK(NeAACDecSetConfiguration(h, cfg) == 1);
+    for (i = in->frames[0].size, frames = 1; frames < 6; frames++) {
+        void *o = NeAACDecDecode(h, &fi, in->data + i, in->size - i);
+        CHECK(o != NULL && fi.error == 0 && fi.samples == 2048 && fi.channels == 2);
+        if (o && fi.samples == 2048) {
+            /* the format in force when the decoder opened stays in effect */
+            const short *p = o;
+            int peak = 0;
+            size_t k;
+            for (k = 0; k < 2048; k++) {
+                int a = p[k] < 0 ? -p[k] : p[k];
+                if (a > peak) peak = a;
+            }
+            CHECK(peak > 10);
+        }
+        i += fi.bytesconsumed;
+    }
+    NeAACDecClose(h);
+}
+
+/* Enabling the downmix mid-stream must not reinterpret the 16-bit scratch. */
+static void downmix_midstream_test(const Input *in)
+{
+    unsigned long rate;
+    unsigned char ch;
+    NeAACDecFrameInfo fi;
+    NeAACDecConfigurationPtr cfg;
+    NeAACDecHandle h = NeAACDecOpen();
+    size_t i = 0, k;
+
+    CHECK(NeAACDecInit(h, in->data, in->size, &rate, &ch) == 0);
+    for (k = 0; k < 4; k++) {
+        CHECK(NeAACDecDecode(h, &fi, in->data + i, in->size - i) != NULL);
+        i += fi.bytesconsumed;
+        if (k == 1) {
+            cfg = NeAACDecGetCurrentConfiguration(h);
+            cfg->downMatrix = 1;
+            CHECK(NeAACDecSetConfiguration(h, cfg) == 1);
+        }
+        if (k >= 2) CHECK(fi.channels == 6 && fi.samples == 6144);
+    }
+    NeAACDecClose(h);
+}
+
 int main(int argc, char **argv)
 {
     static const char *names[] = {"stereo44_lc.aac", "surround51_lc.aac", "stereo32_he.aac", "mono24_lc.aac"};
@@ -325,6 +408,8 @@ int main(int argc, char **argv)
     context = "Decode2"; decode2_test(&inputs[0]);
     context = "API hygiene"; hygiene_test(&inputs[0]);
     context = "corrupt input"; corrupt_test(&inputs[0]);
+    context = "resync and config"; resync_and_config_test(&inputs[0]);
+    context = "mid-stream downmix"; downmix_midstream_test(&inputs[1]);
     for (i = 0; i < 4; i++) { free(inputs[i].frames); free(inputs[i].data); }
     if (failures) fprintf(stderr, "%u checks failed\n", failures);
     else puts("All shim checks passed");

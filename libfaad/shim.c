@@ -21,6 +21,7 @@
 #include "neaacdec.h"
 
 #define SHIM_MAX_CHANNELS 64
+#define SYNC_SEARCH 768
 
 /* FAAD2 error numbers; the strings are indexed by number. */
 enum {
@@ -81,6 +82,8 @@ typedef struct {
     uint8_t *asc;
     uint32_t asc_len;
     pcm_type type;
+    unsigned fmt;   /* output format and downmix in force for the open decoder */
+    int downmix_on;
     int dirty;      /* configuration changed since the decoder was opened */
     int decoded;    /* a frame has been decoded since the decoder was opened */
     long frame;     /* FAAD2 frame counter; drives the silent first frame */
@@ -202,6 +205,8 @@ static int shim_reopen(shim_t *s)
     free(s->pcm);
     s->pcm = NULL;
     s->type = wanted_type(&s->cfg);
+    s->fmt = s->cfg.outputFormat;
+    s->downmix_on = s->cfg.downMatrix;
     if (shim_open_dec(s, s->stream, s->type, s->asc, s->asc_len, &s->dec) != FAAD_OK)
         return -1;
     if (faad_decoder_get_info(s->dec, &info) != FAAD_OK)
@@ -231,8 +236,15 @@ long NeAACDecInit(NeAACDecHandle h, unsigned char *buffer, unsigned long buffer_
 
     if (!s || !samplerate || !channels || buffer_size == 0 || !buffer)
         return -1;
-    if (!adts_sniff(buffer, buffer_size))
-        return -1;
+    {
+        unsigned long k;
+        for (k = 0; k < SYNC_SEARCH && k < buffer_size && !adts_sniff(buffer + k, buffer_size - k); k++)
+            ;
+        if (k >= SYNC_SEARCH || k >= buffer_size)
+            return -1;
+        buffer += k;
+        buffer_size -= k;
+    }
 
     free(s->asc);
     s->asc = NULL;
@@ -474,7 +486,7 @@ static unsigned char map_status(faad_status st)
     case FAAD_ERR_OUTPUT_TOO_SMALL: return ERR_OUTPUT_SMALL;
     case FAAD_ERR_UNSUPPORTED: return ERR_NOT_ALLOWED;
     case FAAD_ERR_DECODE_FAILED: return ERR_BITSTREAM;
-    default: return ERR_BAD_CHANNELS;
+    default: return ERR_NOT_ALLOWED;
     }
 }
 
@@ -482,9 +494,9 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
                          void *dest, unsigned long dest_size)
 {
     faad_stream_info info = { .struct_size = sizeof(info) };
-    uint32_t used = 0, wr = 0, flags = 0, n, frames, i, c, out_ch;
+    uint32_t used = 0, wr = 0, flags = 0, n, frames, i, c, out_ch, skipped = 0;
     uint8_t perm[SHIM_MAX_CHANNELS], pos[SHIM_MAX_CHANNELS];
-    unsigned fmt = s->cfg.outputFormat;
+    unsigned fmt = s->fmt;
     size_t esz, osz, need;
     int moved, downmix;
     faad_status st;
@@ -498,11 +510,21 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
         return NULL;
     }
     if (s->dirty && !s->decoded && shim_reopen(s) != 0) {
-        fi->error = ERR_BAD_CHANNELS;
+        fi->error = ERR_NOT_ALLOWED;
         return NULL;
     }
 
-    st = faad_decode_frame(s->dec, buf, (uint32_t)size, &used, s->pcm, s->pcm_cap, &wr, &flags);
+    /* FAAD2 searches up to 768 bytes for an ADTS syncword inside one call and
+     * then decodes the frame behind the junk; callers rely on that. */
+    for (;;) {
+        st = faad_decode_frame(s->dec, buf + skipped, (uint32_t)(size - skipped), &used,
+                               s->pcm, s->pcm_cap, &wr, &flags);
+        if (st != FAAD_ERR_SYNC_LOST || used == 0 || skipped + used >= size ||
+            skipped + used >= SYNC_SEARCH)
+            break;
+        skipped += used;
+    }
+    used += skipped;
     fi->bytesconsumed = used;
     if (st != FAAD_OK) {
         fi->error = map_status(st);
@@ -522,7 +544,7 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
     n = info.channels;
     esz = s->type == T_I16 ? 2 : 4;
     frames = wr / (uint32_t)(esz * n);
-    downmix = s->cfg.downMatrix && (n == 5 || n == 6);
+    downmix = s->downmix_on && (n == 5 || n == 6);
     out_ch = downmix ? 2 : n;
     moved = build_perm(info.channel_mask, n, perm, pos);
     osz = out_sample_bytes(fmt);
@@ -543,7 +565,7 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
             out = dest;
         } else {
             if (ensure_out(s, need) != 0) {
-                fi->error = ERR_BAD_CHANNELS;
+                fi->error = ERR_NOT_ALLOWED;
                 return NULL;
             }
             out = s->out;
