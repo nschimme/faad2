@@ -100,7 +100,11 @@ jobs:
       run: |
         git clone --depth 1 --branch libfaad https://github.com/nschimme/faac faac
         vsenv=""
-        if [ "$RUNNER_OS" = Windows ]; then vsenv="--vsenv"; fi
+        if [ "$RUNNER_OS" = Windows ]; then
+          # Git's GNU link.exe shadows MSVC's linker in a bash step.
+          rm -f /usr/bin/link.exe
+          vsenv="--vsenv"
+        fi
         meson setup faac-build faac $vsenv --prefix="$RUNNER_TEMP/usrlocal" --libdir=lib -Dbuildtype=release -Ddecoder=true
         ninja -C faac-build install
         echo "PKG_CONFIG_PATH=$RUNNER_TEMP/usrlocal/lib/pkgconfig" >> "$GITHUB_ENV"
