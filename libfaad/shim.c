@@ -250,6 +250,10 @@ long NeAACDecInit(NeAACDecHandle h, unsigned char *buffer, unsigned long buffer_
             return -1;
         buffer += k;
         buffer_size -= k;
+        /* Only AAC-LC decodes. Say so here, where players can still fall back
+         * to another decoder, rather than failing on the first frame. */
+        if ((buffer[2] >> 6) != 1)
+            return -1;
     }
 
     free(s->asc);

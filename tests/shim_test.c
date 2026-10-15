@@ -320,6 +320,16 @@ static void resync_and_config_test(const Input *in)
     NeAACDecFrameInfo fi;
     NeAACDecConfigurationPtr cfg;
 
+    {   /* a Main profile ADTS stream is refused at Init, not on the first frame */
+        unsigned char main_hdr[64];
+        unsigned long r;
+        unsigned char c;
+        NeAACDecHandle m = NeAACDecOpen();
+        memcpy(main_hdr, in->data, sizeof main_hdr < in->size ? sizeof main_hdr : in->size);
+        main_hdr[2] &= 0x3f;
+        CHECK(NeAACDecInit(m, main_hdr, sizeof main_hdr, &r, &c) < 0);
+        NeAACDecClose(m);
+    }
     for (i = 0; i < 5 && i < in->count; i++) cut += in->frames[i].size;
     spliced = allocate(in->size + junk);
     memcpy(spliced, in->data, cut);
