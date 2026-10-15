@@ -13,3 +13,6 @@ NeAACDecGetErrorMessage           @8
 NeAACDecAudioSpecificConfig       @9
 NeAACDecPostSeekReset             @10
 NeAACDecDecode2                   @11
+NeAACDecGetCapabilities           @12
+NeAACDecGetVersion                @13
+NeAACDecInitDRM                   @14

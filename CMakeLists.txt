@@ -3,9 +3,6 @@
 #  - Solaris 11.4 SRU 15 : 3.15
 cmake_minimum_required(VERSION 3.15)
 
-include(CheckLibraryExists)
-include(CheckSymbolExists)
-
 project(LIBFAAD2 LANGUAGES C)
 
 # Set a default build type if none was specified
@@ -50,7 +47,8 @@ if(BUILD_SHARED_LIBS)
   endif()
 endif()
 
-find_library(MATH_LIBRARY m)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FAAD3 REQUIRED IMPORTED_TARGET faad3)
 
 include(GNUInstallDirs)
 
@@ -82,100 +80,38 @@ file(READ include/faad.h.in FAAD_H_SRC)
 string(REGEX REPLACE "@VERSION@" "${FAAD_VERSION}" FAAD_H_SRC ${FAAD_H_SRC})
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/include/faad.h ${FAAD_H_SRC})
 
-# Read sources list
-
-file(GLOB_RECURSE LIBFAAD_SOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} libfaad/*.c libfaad/*.h)
-mark_as_advanced(LIBFAAD_SOURCES)
-
-file(GLOB_RECURSE FAAD_SOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} frontend/*.c frontend/*.h)
-if (NOT MSVC)
-  list(FILTER FAAD_SOURCES EXCLUDE REGEX ".*getopt\\.[ch]$")
-endif()
-
-# Build
-
-# Lets stick to predefined config, until more flexibility is actually requested.
-set(FAAD_DEFINES
-  HAVE_INTTYPES_H=1
-  HAVE_MEMCPY=1
-  HAVE_STRING_H=1
-  HAVE_STRINGS_H=1
-  HAVE_SYS_STAT_H=1
-  HAVE_SYS_TYPES_H=1
-  PACKAGE_VERSION=\"${FAAD_VERSION}\"
+# The compatibility library contains only the API shim.
+add_library(faad libfaad/shim.c)
+set_target_properties(faad PROPERTIES C_VISIBILITY_PRESET hidden)
+target_include_directories(faad PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-
-option(FAAD_APPLY_DRC "Apply dynamic range control" ON)
-if(FAAD_APPLY_DRC)
-  list(APPEND FAAD_DEFINES
-    APPLY_DRC
-  )
-endif()
-
-check_library_exists(m lrintf "" HAVE_LIBM)
-if(HAVE_LIBM)
-  list(APPEND CMAKE_REQUIRED_LIBRARIES m)
-endif()
-
-check_symbol_exists(lrintf "math.h" HAVE_LRINTF)
-if(HAVE_LRINTF)
-  list(APPEND FAAD_DEFINES
-    HAVE_LRINTF=1
-  )
-endif()
-
-set(FAAD_FLAGS
-  -Wall
-)
-if(MSVC)
-  list(APPEND FAAD_FLAGS
-    /wd4702 # unreachable code; there is a false-positive report
-    /wd4820 # implicit padding in structs
-    /wd5045 # Spectre nonsense
-  )
-else()
-  list(APPEND FAAD_FLAGS
-    -pedantic
-  )
-endif()
-
-if(CMAKE_C_COMPILER_ID MATCHES "GNU")
-  list(APPEND FAAD_FLAGS -ffloat-store)
-endif()  # GCC
-
-file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/include/neaacdec.h
-     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/include)
-
-foreach(LIB faad faad_drm faad_fixed faad_drm_fixed)
-  add_library(${LIB} ${LIBFAAD_SOURCES})
-  if(MATH_LIBRARY)
-    target_link_libraries(${LIB} PUBLIC ${MATH_LIBRARY})
+target_compile_definitions(faad PRIVATE FAAD2_VERSION="${FAAD_VERSION}")
+if(BUILD_SHARED_LIBS)
+  target_link_libraries(faad PRIVATE PkgConfig::FAAD3)
+  if(WIN32)
+    target_sources(faad PRIVATE libfaad2.def)
   endif()
-  target_include_directories(${LIB} PUBLIC
-    ${CMAKE_CURRENT_BINARY_DIR}/include
-  )
-  target_include_directories(${LIB} PRIVATE
-    libfaad
-  )
-  target_compile_definitions(${LIB} PRIVATE
-    ${FAAD_DEFINES}
-  )
-  target_compile_options(${LIB} PRIVATE
-    ${FAAD_FLAGS}
-  )
-endforeach()
+else()
+  target_link_libraries(faad PUBLIC PkgConfig::FAAD3)
+endif()
+if(NOT WIN32)
+  target_link_libraries(faad PRIVATE m)
+endif()
+if(NOT MSVC)
+  target_compile_options(faad PRIVATE -Wall -Wextra -pedantic)
+endif()
 
-foreach(LIB faad_drm faad_drm_fixed)
-target_compile_definitions(${LIB} PRIVATE
-  DRM_SUPPORT
-)
-endforeach()
-
-foreach(LIB faad_fixed faad_drm_fixed)
-target_compile_definitions(${LIB} PRIVATE
-  FIXED_POINT
-)
-endforeach()
+# Compile the libFuzzer entry points without requiring a fuzzing runtime.
+option(FAAD_BUILD_FUZZ "Build fuzz entry point object targets" OFF)
+if(FAAD_BUILD_FUZZ)
+  foreach(name decode config)
+    add_library(fuzz_${name} OBJECT fuzz/fuzz_${name}.c)
+    target_link_libraries(fuzz_${name} PRIVATE faad)
+  endforeach()
+endif()
 
 # Generate a pkg-config files
 
@@ -237,47 +173,29 @@ function(transform_pc_file INPUT_FILE OUTPUT_FILE VERSION)
 
   string(REGEX REPLACE "@VERSION@" "${VERSION}" TEXT ${TEXT})
 
+  set(FAAD_PC_LIBS_PRIVATE "")
+  if(NOT WIN32)
+    set(FAAD_PC_LIBS_PRIVATE "-lm")
+  endif()
+  string(REPLACE "@FAAD_PC_LIBS_PRIVATE@" "${FAAD_PC_LIBS_PRIVATE}" TEXT "${TEXT}")
   file(WRITE ${OUTPUT_FILE} ${TEXT})
 endfunction()
 
 transform_pc_file("libfaad/faad2.pc.in" "${CMAKE_CURRENT_BINARY_DIR}/faad2.pc" "${FAAD_VERSION}")
 
-foreach(LIB faad faad_drm faad_fixed faad_drm_fixed)
-  set_target_properties(${LIB} PROPERTIES
-      VERSION "${FAAD_ABI_COMPATIBILITY}.${FAAD_ABI_VERSION_AGE}.${FAAD_ABI_VERSION_REVISION}"
-      SOVERSION "${FAAD_ABI_COMPATIBILITY}"
-  )
-endforeach()
+set_target_properties(faad PROPERTIES
+  VERSION "${FAAD_ABI_COMPATIBILITY}.${FAAD_ABI_VERSION_AGE}.${FAAD_ABI_VERSION_REVISION}"
+  SOVERSION "${FAAD_ABI_COMPATIBILITY}"
+)
 
-# CLI
-option(FAAD_BUILD_CLI "Build faad_cli executable" ON)
-if (FAAD_BUILD_CLI)
-  add_executable(faad_cli ${FAAD_SOURCES})
-  target_link_libraries(faad_cli faad)
-  target_compile_definitions(faad_cli PRIVATE ${FAAD_DEFINES})
-  target_compile_options(faad_cli PRIVATE ${FAAD_FLAGS})
-
-  if (MSVC)
-    target_include_directories(faad_cli PRIVATE
-      frontend
-    )
-  else()
-    set_target_properties(faad_cli PROPERTIES OUTPUT_NAME faad)
-  endif()
-endif()
 # Installation
 
 if(NOT FAAD_BUNDLED_MODE)
   install(FILES "${CMAKE_CURRENT_BINARY_DIR}/faad2.pc"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
 
-  set(INSTALL_TARGETS faad faad_drm)
-  if (FAAD_BUILD_CLI)
-    list(APPEND INSTALL_TARGETS faad_cli)
-  endif()
-
   install(
-    TARGETS ${INSTALL_TARGETS}
+    TARGETS faad
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
@@ -286,13 +204,12 @@ if(NOT FAAD_BUNDLED_MODE)
   # exclude faad.h.in
   install(
     FILES ${CMAKE_CURRENT_BINARY_DIR}/include/faad.h
-    FILES ${CMAKE_CURRENT_BINARY_DIR}/include/neaacdec.h
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/neaacdec.h
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   )
 
   install(
-    FILES frontend/faad.man
-    DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
-    RENAME faad.1
+    FILES docs/libfaad.3
+    DESTINATION ${CMAKE_INSTALL_MANDIR}/man3
   )
 endif()  # FAAD_BUNDLED_MODE

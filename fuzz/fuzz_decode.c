@@ -26,7 +26,6 @@
 ** For more info contact Nero AG through Mpeg4AAClicense@nero.com.
 **/
 
-#include <fenv.h> 
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -34,15 +33,13 @@
 
 #include "neaacdec.h"
 
-int feenableexcept(int excepts);
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   size_t preamble = 2 + 2 + 1 + sizeof(NeAACDecConfiguration);
   NeAACDecConfiguration config;
-  uint64_t sample_rate;
+  unsigned long sample_rate;
   unsigned char num_channels;
   NeAACDecConfigurationPtr config_ptr;
-  /* feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW | FE_UNDERFLOW); */
 
   if (size < preamble) return 0;
   size_t len1 = data[0] | (data[1] << 8);
@@ -83,19 +80,14 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   ok = NeAACDecSetConfiguration(decoder, &config);
   if (!ok) goto cleanup;
   config_ptr = NeAACDecGetCurrentConfiguration(decoder);
-  if (!config_ptr) __builtin_trap();
+  if (!config_ptr) abort();
   if (use_init2) {
     res = NeAACDecInit2(decoder, part1, len1, &sample_rate, &num_channels);
   } else {
     res = NeAACDecInit(decoder, part1, len1, &sample_rate, &num_channels);
   }
   if (use_drm) {
-#ifdef DRM_SUPPORT
-    NeAACDecInitDRM(&decoder, drm_channels, drm_sample_rate);
-#else
-    (void)drm_channels;
-    (void)drm_sample_rate;
-#endif
+    NeAACDecInitDRM(&decoder, drm_sample_rate, drm_channels);
   }
 
   if (res != 0) goto cleanup;

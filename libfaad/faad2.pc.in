@@ -4,8 +4,9 @@ libdir=@libdir@
 includedir=@includedir@
 
 Name: FAAD2
-Description: Freeware Advanced Audio (AAC) Decoder
+Description: FAAD2 compatibility shim over libfaad3
 Version: @VERSION@
 Libs: -L${libdir} -lfaad
-Libs.private: -lm
+Requires.private: faad3
+Libs.private: @FAAD_PC_LIBS_PRIVATE@
 Cflags: -I${includedir}
