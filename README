@@ -45,6 +45,9 @@ Known differences from FAAD2:
 - For implicit SBR in a raw/MP4 configuration at or below 24 kHz, NeAACDecInit2
   reports the core rate; the frames carry the doubled rate (ADTS is reported
   correctly). Use explicit signalling, or read the rate from the frames.
+- Init reports the channel configuration index FAAD2 did for 7.1 (two for
+  ADTS, seven for a raw/MP4 configuration); every decoded frame reports the
+  real eight.
 - A corrupt or false-sync ADTS frame yields an error number from the same table
   but not always the same one as FAAD2.
 - 32-bit output clamps at positive full scale instead of wrapping.

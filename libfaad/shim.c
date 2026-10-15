@@ -239,6 +239,7 @@ long NeAACDecInit(NeAACDecHandle h, unsigned char *buffer, unsigned long buffer_
     faad_stream_info info = { .struct_size = sizeof(info) };
     uint32_t used = 0, wr = 0, fl = 0;
     uint8_t *pcm;
+    unsigned cc;
 
     if (!s || !samplerate || !channels || buffer_size == 0 || !buffer)
         return -1;
@@ -268,7 +269,8 @@ long NeAACDecInit(NeAACDecHandle h, unsigned char *buffer, unsigned long buffer_
      * on a scratch decoder. A buffer too short for a frame falls back to the
      * ADTS header. */
     {
-        unsigned sfi = (buffer[2] >> 2) & 15, cc = ((buffer[2] & 1) << 2) | (buffer[3] >> 6);
+        unsigned sfi = (buffer[2] >> 2) & 15;
+        cc = ((buffer[2] & 1) << 2) | (buffer[3] >> 6);
         *samplerate = sr_table[sfi < 12 ? sfi : 0];
         *channels = (unsigned char)(cc == 7 ? 8 : cc);
     }
@@ -285,6 +287,10 @@ long NeAACDecInit(NeAACDecHandle h, unsigned char *buffer, unsigned long buffer_
         }
         faad_decoder_close(&probe);
     }
+    /* FAAD2 reported two channels for any ADTS channel configuration above 6,
+     * whatever the stream carried; the frames report the real count. */
+    if (cc == 7)
+        *channels = 2;
     return 0;
 }
 
@@ -313,6 +319,9 @@ char NeAACDecInit2(NeAACDecHandle h, unsigned char *pBuffer, unsigned long size,
     /* FAAD2 reported the channels of the core, which is mono for PS streams;
      * the frames then carry two. */
     *channels = (unsigned char)(info.object_type == FAAD_OBJ_HE_AAC_V2 ? 1 : info.channels);
+    /* FAAD2 returned the channel configuration index, which is 7 for 7.1. */
+    if (*channels == 8)
+        *channels = 7;
     return 0;
 }
 
