@@ -366,14 +366,22 @@ char NeAACDecAudioSpecificConfig(unsigned char *pBuffer, unsigned long size,
     }
     faad_decoder_close(&d);
 
-    /* A PS stream keeps object type 5 here, as signalled by the sync extension. */
-    asc->objectTypeIndex = (unsigned char)(info.object_type == FAAD_OBJ_HE_AAC_V2 ? HE_AAC : info.object_type);
+    /* FAAD2 reported the object type the ASC starts with when SBR is signalled
+     * explicitly (AOT 5 or 29 is wrapped around an AAC-LC core, so 2), and 5
+     * when the SBR or PS extension follows an AOT 2 core. */
+    {
+        unsigned first = pBuffer[0] >> 3;
+        int hev2 = info.object_type == FAAD_OBJ_HE_AAC_V2;
+        asc->objectTypeIndex = (unsigned char)((first == 5 || first == 29) ? LC :
+                               hev2 ? HE_AAC : info.object_type);
+        asc->sbr_present_flag = info.object_type != FAAD_OBJ_LC ? 1 : -1;
+        asc->ps_present_flag = hev2 ? 1 : -1;
+    }
     asc->samplingFrequency = info.sample_rate;
     asc->channelsConfiguration = (unsigned char)(info.object_type == FAAD_OBJ_HE_AAC_V2 ? 1 : info.channels);
-    asc->sbr_present_flag = info.object_type != FAAD_OBJ_LC;
-    asc->ps_present_flag = info.object_type == FAAD_OBJ_HE_AAC_V2;
+    asc->frameLengthFlag = (info.frame_samples % 960) == 0 && (info.frame_samples % 1024) != 0;
     {
-        unsigned long core = asc->sbr_present_flag ? info.sample_rate / 2 : info.sample_rate;
+        unsigned long core = asc->sbr_present_flag > 0 ? info.sample_rate / 2 : info.sample_rate;
         for (i = 0; i < 12; i++)
             if (sr_table[i] == core)
                 break;
