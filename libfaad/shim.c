@@ -239,9 +239,9 @@ long NeAACDecInit(NeAACDecHandle h, unsigned char *buffer, unsigned long buffer_
         return -1;
     {
         unsigned long k;
-        for (k = 0; k < SYNC_SEARCH && k < buffer_size && !adts_sniff(buffer + k, buffer_size - k); k++)
+        for (k = 0; k < buffer_size && !adts_sniff(buffer + k, buffer_size - k); k++)
             ;
-        if (k >= SYNC_SEARCH || k >= buffer_size)
+        if (k >= buffer_size)
             return -1;
         buffer += k;
         buffer_size -= k;
@@ -536,6 +536,20 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
     fi->bytesconsumed = used;
     if (st != FAAD_OK) {
         fi->error = map_status(st);
+        /* FAAD2 consumed nothing on an error and callers then stepped through
+         * the stream; skipping a whole claimed frame would jump over real
+         * frames when the header was a false sync. */
+        if (st == FAAD_ERR_DECODE_FAILED && s->stream == FAAD_STREAM_ADTS && used > 1)
+            fi->bytesconsumed = 1;
+        return NULL;
+    }
+    if (flags & FAAD_FRAME_CONCEALED) {
+        /* FAAD2 reported corrupt core data as an error and returned no samples;
+         * its callers and their resync logic expect that. The claimed length
+         * of a corrupt ADTS frame cannot be trusted either. */
+        fi->error = ERR_BITSTREAM;
+        if (s->stream == FAAD_STREAM_ADTS)
+            fi->bytesconsumed = 1;
         return NULL;
     }
     s->decoded = 1;

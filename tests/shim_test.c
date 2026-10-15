@@ -453,6 +453,60 @@ static void dab_test(const char *dir)
     }
 }
 
+/* Junk that contains false syncwords must not hide the frames behind it. */
+static size_t decode_stepping(const unsigned char *d, size_t n)
+{
+    unsigned long rate;
+    unsigned char ch;
+    NeAACDecHandle h = NeAACDecOpen();
+    NeAACDecFrameInfo fi;
+    size_t pos, ok = 0;
+
+    if (NeAACDecInit(h, (unsigned char *)d, n, &rate, &ch) != 0) { NeAACDecClose(h); return 0; }
+    for (pos = 0; pos < n;) {
+        void *o = NeAACDecDecode(h, &fi, (unsigned char *)d + pos, n - pos);
+        pos += fi.bytesconsumed ? fi.bytesconsumed : 1;
+        if (o && !fi.error) ok++;
+    }
+    NeAACDecClose(h);
+    return ok;
+}
+
+static void junk_test(const Input *in)
+{
+    static const unsigned char bad_rate[] = {0xff, 0xf1, 0x3c, 0x80, 0x10, 0x20, 0xfc};
+    static const unsigned char bad_len[] = {0xff, 0xf1, 0x50, 0x80, 0xff, 0xe0, 0xfc};
+    size_t cut = 0, i, k;
+    unsigned char *buf = allocate(in->size + 4096);
+    const unsigned char *fake[] = {bad_rate, bad_len};
+
+    for (i = 0; i < 5; i++) cut += in->frames[i].size;
+    for (k = 0; k < 2; k++) {
+        size_t n = 0;
+        memcpy(buf, in->data, cut); n = cut;
+        memcpy(buf + n, fake[k], 7); n += 7;
+        memset(buf + n, 0x22, 30); n += 30;
+        memcpy(buf + n, in->data + cut, in->size - cut); n += in->size - cut;
+        CHECK(decode_stepping(buf, n) == in->count);
+    }
+    {   /* repeated syncword-like junk */
+        size_t n = cut;
+        memcpy(buf, in->data, cut);
+        for (i = 0; i < 10; i++) { buf[n++] = 0xff; buf[n++] = 0xf1; }
+        memset(buf + n, 0x33, 20); n += 20;
+        memcpy(buf + n, in->data + cut, in->size - cut); n += in->size - cut;
+        CHECK(decode_stepping(buf, n) == in->count);
+    }
+    {   /* a tag longer than the search window in front of the stream */
+        size_t n = 1000;
+        memset(buf, 0, n);
+        memcpy(buf, "ID3", 3);
+        memcpy(buf + n, in->data, in->size); n += in->size;
+        CHECK(decode_stepping(buf, n) == in->count);
+    }
+    free(buf);
+}
+
 int main(int argc, char **argv)
 {
     static const char *names[] = {"stereo44_lc.aac", "surround51_lc.aac", "stereo32_he.aac", "mono24_lc.aac"};
@@ -473,6 +527,7 @@ int main(int argc, char **argv)
     context = "resync and config"; resync_and_config_test(&inputs[0]);
     context = "mid-stream downmix"; downmix_midstream_test(&inputs[1]);
     context = "DAB+"; dab_test(argv[1]);
+    context = "junk and false syncs"; junk_test(&inputs[0]);
     for (i = 0; i < 4; i++) { free(inputs[i].frames); free(inputs[i].data); }
     if (failures) fprintf(stderr, "%u checks failed\n", failures);
     else puts("All shim checks passed");
