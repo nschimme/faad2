@@ -1,0 +1,3 @@
+[submodule "external/faac"]
+	path = external/faac
+	url = https://github.com/nschimme/faac.git

@@ -76,7 +76,7 @@ jobs:
     - name: Checkout the source
       uses: actions/checkout@v4
       with:
-        submodules: false
+        submodules: recursive
         fetch-depth: 1
     - uses: actions/setup-python@v5
       with:
@@ -98,14 +98,13 @@ jobs:
     - name: Build and install libfaad3
       shell: bash
       run: |
-        git clone --depth 1 --branch libfaad https://github.com/nschimme/faac faac
         vsenv=""
         if [ "$RUNNER_OS" = Windows ]; then
           # Git's GNU link.exe shadows MSVC's linker in a bash step.
           rm -f /usr/bin/link.exe
           vsenv="--vsenv"
         fi
-        meson setup faac-build faac $vsenv --prefix="$RUNNER_TEMP/usrlocal" --libdir=lib -Dbuildtype=release -Ddecoder=true
+        meson setup faac-build external/faac $vsenv --prefix="$RUNNER_TEMP/usrlocal" --libdir=lib -Dbuildtype=release -Ddecoder=true
         ninja -C faac-build install
         echo "PKG_CONFIG_PATH=$RUNNER_TEMP/usrlocal/lib/pkgconfig" >> "$GITHUB_ENV"
     - name: Configure and build
@@ -133,7 +132,7 @@ jobs:
     - name: Checkout the source
       uses: actions/checkout@v4
       with:
-        submodules: false
+        submodules: recursive
         fetch-depth: 1
     - uses: msys2/setup-msys2@v2
       with:
@@ -150,8 +149,7 @@ jobs:
           gcc:p
     - name: Build and install libfaad3
       run: |
-        git clone --depth 1 --branch libfaad https://github.com/nschimme/faac faac
-        meson setup faac-build faac --prefix="$(pwd)/temp" --libdir=lib -Dbuildtype=release -Ddecoder=true
+        meson setup faac-build external/faac --prefix="$(pwd)/temp" --libdir=lib -Dbuildtype=release -Ddecoder=true
         ninja -C faac-build install
     - name: Configure and build
       run: |
