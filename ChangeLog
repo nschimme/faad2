@@ -1,3 +1,16 @@
+Next release:
+	* Replace the legacy decoder with a library-only NeAACDec API shim over
+	  libfaad3, retaining the libfaad.so.2 ABI and FAAD2 channel order/positions.
+	  The CLI now ships with libfaad3.
+	* Drop Main/LTP/SSR/LD/ER profiles, DRM, fixed-point decoding, LATM, ADIF,
+	  and raw AAC without ASC. Ignore useOldADTSFormat and
+	  dontUpSampleImplicitSBR; InitDRM remains exported but reports failure.
+	* Apply dynamic range control and programme level normalisation as before,
+	  including the 20 dB attenuation of streams without a programme reference
+	  level.
+	* Report LC-only streams at or below 24 kHz at their real sample rate,
+	  without upsampling to twice the rate.
+
 2.11.4 (2026-10-01):
 	[ Logan Russell ]
 	* Fix the fixed-point SBR envelope estimate
