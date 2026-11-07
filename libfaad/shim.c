@@ -615,11 +615,17 @@ char NeAACDecAudioSpecificConfig(unsigned char *pBuffer, unsigned long size,
 }
 
 /* FAAD2 position code for each bit of a WAVE channel mask. */
-static unsigned mask_bit_code(unsigned bit)
+/* wide: the mask has an inner front pair (FLC FRC), which is how libfaad3 reads
+ * channelConfiguration 7. FAAD2 labels that stream's three pairs front, side and back
+ * in stream order, so the inner pair is the front one, FL/FR the side one, and BL/BR the
+ * back one. */
+static unsigned mask_bit_code(unsigned bit, int wide)
 {
     switch (bit) {
-    case 0: return FRONT_CHANNEL_LEFT;
-    case 1: return FRONT_CHANNEL_RIGHT;
+    case 0: return wide ? SIDE_CHANNEL_LEFT : FRONT_CHANNEL_LEFT;
+    case 1: return wide ? SIDE_CHANNEL_RIGHT : FRONT_CHANNEL_RIGHT;
+    case 6: return wide ? FRONT_CHANNEL_LEFT : UNKNOWN_CHANNEL;
+    case 7: return wide ? FRONT_CHANNEL_RIGHT : UNKNOWN_CHANNEL;
     case 2: return FRONT_CHANNEL_CENTER;
     case 3: return LFE_CHANNEL;
     case 4: return BACK_CHANNEL_LEFT;
@@ -639,7 +645,7 @@ static int build_perm(uint32_t mask, uint32_t n, uint8_t *perm, uint8_t *pos)
 {
     uint8_t code[SHIM_MAX_CHANNELS];
     uint32_t k = 0, i, j;
-    int moved = 0;
+    int moved = 0, wide = (mask & 0xC0u) == 0xC0u;
 
     for (i = 0; i < n; i++)
         perm[i] = (uint8_t)i, pos[i] = UNKNOWN_CHANNEL;
@@ -647,7 +653,7 @@ static int build_perm(uint32_t mask, uint32_t n, uint8_t *perm, uint8_t *pos)
         return 0;
     for (i = 0; i < 32 && k < n; i++)
         if (mask & (1u << i))
-            code[k++] = (uint8_t)mask_bit_code(i);
+            code[k++] = (uint8_t)mask_bit_code(i, wide);
     if (k != n)
         return 0;
     for (i = 0; i < n; i++)
