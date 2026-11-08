@@ -225,6 +225,65 @@ static void seek_test(const Input *in)
     }
 }
 
+/* HE-AACv2 in ADTS: mono core with SBR must report 2 channels at Init and every frame. */
+static void he_v2_adts_test(const char *dir)
+{
+    char path[512];
+    FILE *f;
+    unsigned char *d, *adts;
+    long n, pos;
+    unsigned long rate;
+    unsigned char ch;
+    NeAACDecHandle h;
+    NeAACDecFrameInfo fi;
+    unsigned frames = 0;
+    uint32_t asc_len, adts_len = 0;
+
+    snprintf(path, sizeof path, "%s/dab/he2_st48.dab", dir);
+    f = fopen(path, "rb");
+    CHECK(f != NULL);
+    if (!f) return;
+    fseek(f, 0, SEEK_END); n = ftell(f); fseek(f, 0, SEEK_SET);
+    d = allocate((size_t)n);
+    CHECK(fread(d, 1, (size_t)n, f) == (size_t)n);
+    fclose(f);
+
+    asc_len = d[0] | d[1] << 8 | d[2] << 16 | (uint32_t)d[3] << 24;
+    adts = allocate((size_t)n + 4096);
+    for (pos = 4 + asc_len; pos + 4 <= n;) {
+        uint32_t len = d[pos] | d[pos + 1] << 8 | d[pos + 2] << 16 | (uint32_t)d[pos + 3] << 24;
+        uint32_t flen = len + 7;
+        unsigned char hdr[7] = {
+            0xff, 0xf1,
+            (unsigned char)((1 << 6) | (6 << 2) | 0),
+            (unsigned char)((1 << 6) | ((flen >> 11) & 3)),
+            (unsigned char)((flen >> 3) & 0xff),
+            (unsigned char)(((flen & 7) << 5) | 0x1f),
+            0xfc
+        };
+        memcpy(adts + adts_len, hdr, 7);
+        memcpy(adts + adts_len + 7, d + pos + 4, len);
+        adts_len += flen;
+        pos += 4 + len;
+    }
+
+    h = NeAACDecOpen();
+    CHECK((signed char)NeAACDecInit(h, adts, adts_len, &rate, &ch) == 0);
+    EQ(rate, 48000);
+    EQ(ch, 2);
+    for (pos = 0; pos < adts_len; frames++) {
+        void *o = NeAACDecDecode(h, &fi, adts + pos, adts_len - pos);
+        CHECK(o != NULL && fi.error == 0);
+        EQ(fi.channels, 2);
+        EQ(fi.samplerate, 48000);
+        pos += fi.bytesconsumed;
+    }
+    CHECK(frames >= 8);
+    free(adts);
+    free(d);
+    NeAACDecClose(h);
+}
+
 static void decode2_test(const Input *in)
 {
     int small;
@@ -798,6 +857,7 @@ int main(int argc, char **argv)
     context = "resync and config"; resync_and_config_test(&inputs[0]);
     context = "mid-stream downmix"; downmix_midstream_test(&inputs[1]);
     context = "DAB+"; dab_test(argv[1]);
+    context = "HE-AACv2 ADTS"; he_v2_adts_test(argv[1]);
     context = "junk and false syncs"; junk_test(&inputs[0]);
     context = "DRC"; drc_test(argv[1]);
     for (i = 0; i < 4; i++) { free(inputs[i].frames); free(inputs[i].data); }

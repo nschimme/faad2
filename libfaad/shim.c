@@ -113,6 +113,7 @@ typedef struct {
     int adts_sfi;   /* sampling frequency index of the ADTS stream, -1 until known */
     int upsample;   /* FAAD2 doubled the rate of this stream's frames without SBR data */
     int downsample; /* implicit SBR above 24 kHz: FAAD2 returned the core rate */
+    int upmatrix;   /* duplicate mono to stereo for implicit PS in mono SBR ADTS */
     faar_resampler *rs;
     uint32_t rs_ch, rs_rate, rs_out;
     float *fifo;    /* resampled frames not yet returned, interleaved */
@@ -394,7 +395,6 @@ long NeAACDecInit(NeAACDecHandle h, unsigned char *buffer, unsigned long buffer_
     shim_t *s = h;
     faad_decoder *probe = NULL;
     faad_stream_info info = { .struct_size = sizeof(info) };
-    uint32_t used = 0, wr = 0, fl = 0;
     uint8_t *pcm;
     unsigned cc;
     enum faad_object_type probed = FAAD_OBJ_LC;
@@ -422,9 +422,10 @@ long NeAACDecInit(NeAACDecHandle h, unsigned char *buffer, unsigned long buffer_
     s->frame = 0;
     s->upsample = 0;
     s->downsample = 0;
+    s->upmatrix = 0;
     s->adts_sfi = (buffer[2] >> 2) & 15;
 
-    /* Report the format the decoder will really emit: decode the first frame
+    /* Report the format the decoder will really emit: decode initial frames
      * on a scratch decoder. A buffer too short for a frame falls back to the
      * ADTS header. */
     {
@@ -436,16 +437,33 @@ long NeAACDecInit(NeAACDecHandle h, unsigned char *buffer, unsigned long buffer_
     if (shim_open_dec(s, FAAD_STREAM_ADTS, T_I16, NULL, 0, &probe) == FAAD_OK) {
         if (faad_decoder_get_info(probe, &info) == FAAD_OK &&
             (pcm = malloc(info.max_output_bytes)) != NULL) {
-            if (faad_decode_frame(probe, buffer, (uint32_t)buffer_size, &used, pcm,
-                                  info.max_output_bytes, &wr, &fl) == FAAD_OK &&
-                faad_decoder_get_info(probe, &info) == FAAD_OK && (info.flags & FAAD_STREAM_FORMAT_KNOWN)) {
-                *samplerate = info.sample_rate;
-                *channels = (unsigned char)info.channels;
-                probed = info.object_type;
+            uint32_t probe_off = 0;
+            unsigned probe_cnt = 0;
+            while (probe_off < buffer_size && probe_cnt < 32) {
+                uint32_t f_used = 0, f_wr = 0, f_fl = 0;
+                if (faad_decode_frame(probe, buffer + probe_off, (uint32_t)(buffer_size - probe_off),
+                                      &f_used, pcm, info.max_output_bytes, &f_wr, &f_fl) != FAAD_OK || f_used == 0)
+                    break;
+                if (faad_decoder_get_info(probe, &info) == FAAD_OK && (info.flags & FAAD_STREAM_FORMAT_KNOWN)) {
+                    *samplerate = info.sample_rate;
+                    *channels = (unsigned char)info.channels;
+                    probed = info.object_type;
+                    if (info.object_type == FAAD_OBJ_HE_AAC_V2 || info.channels > 1)
+                        break;
+                }
+                probe_off += f_used;
+                probe_cnt++;
             }
             free(pcm);
         }
         faad_decoder_close(&probe);
+    }
+    /* Implicit Parametric Stereo: in ADTS, HE-AACv2 streams declare a mono core
+     * (cc == 1) and only transmit PS headers periodically. Treat mono ADTS streams
+     * with SBR as implicit stereo, upmixing early mono frames to dual-mono. */
+    if (cc == 1 && probed != FAAD_OBJ_LC) {
+        s->upmatrix = 1;
+        *channels = 2;
     }
     /* A stream without SBR data at or below 24 kHz is assumed to carry SBR
      * implicitly, and FAAD2 reported and returned its doubled rate. */
@@ -494,6 +512,7 @@ char NeAACDecInit2(NeAACDecHandle h, unsigned char *pBuffer, unsigned long size,
     s->frame = 0;
     s->upsample = 0;
     s->downsample = 0;
+    s->upmatrix = 0;
     if (shim_reopen(s) != 0)
         return -1;
     if (faad_decoder_get_info(s->dec, &info) != FAAD_OK || !(info.flags & FAAD_STREAM_FORMAT_KNOWN))
@@ -875,13 +894,13 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
         st_type = T_F32;
     }
     downmix = s->downmix_on && (n == 5 || n == 6);
-    out_ch = downmix ? 2 : n;
+    out_ch = (s->upmatrix && n == 1) ? 2 : (downmix ? 2 : n);
     moved = build_perm(info.channel_mask, n, perm, pos);
     osz = out_sample_bytes(fmt);
     need = (size_t)frames * out_ch * osz;
 
     src = (upsampled || downsampled) ? src_pcm : s->pcm;
-    if (!downmix && !moved &&
+    if (!downmix && !moved && !(s->upmatrix && n == 1) &&
         ((st_type == T_I16 && fmt == FAAD_FMT_16BIT) ||
          (st_type == T_I32 && fmt == FAAD_FMT_24BIT) ||
          (st_type == T_F32 && fmt == FAAD_FMT_FLOAT))) {
@@ -908,6 +927,26 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
                 double bl = x[perm[3]], br = x[perm[4]];
                 put_sample(fmt, out, (size_t)i * 2, DM_MUL * (l + cen * RSQRT2 + bl * RSQRT2));
                 put_sample(fmt, out, (size_t)i * 2 + 1, DM_MUL * (r + cen * RSQRT2 + br * RSQRT2));
+            }
+        } else if (s->upmatrix && n == 1) {
+            if (st_type == T_F32) {
+                const float *f = (const float *)src;
+                for (i = 0; i < frames; i++) {
+                    put_sample(fmt, out, (size_t)i * 2, f[i]);
+                    put_sample(fmt, out, (size_t)i * 2 + 1, f[i]);
+                }
+            } else if (st_type == T_I16) {
+                const int16_t *p = (const int16_t *)src;
+                for (i = 0; i < frames; i++) {
+                    ((int16_t *)out)[(size_t)i * 2] = p[i];
+                    ((int16_t *)out)[(size_t)i * 2 + 1] = p[i];
+                }
+            } else {
+                const int32_t *p = (const int32_t *)src;
+                for (i = 0; i < frames; i++) {
+                    ((int32_t *)out)[(size_t)i * 2] = p[i];
+                    ((int32_t *)out)[(size_t)i * 2 + 1] = p[i];
+                }
             }
         } else if (st_type == T_F32) {
             const float *f = (const float *)src;
@@ -942,7 +981,7 @@ static void *shim_decode(shim_t *s, NeAACDecFrameInfo *fi, const uint8_t *buf, u
     fi->sbr = downsampled ? SBR_DOWNSAMPLED :
               upsampled ? NO_SBR_UPSAMPLED : (flags & FAAD_FRAME_SBR) ? SBR_UPSAMPLED : NO_SBR;
     fi->ps = (flags & FAAD_FRAME_PS) ? 1 : 0;
-    if (downmix) {
+    if (downmix || (s->upmatrix && n == 1)) {
         fi->num_front_channels = 2;
         fi->channel_position[0] = FRONT_CHANNEL_LEFT;
         fi->channel_position[1] = FRONT_CHANNEL_RIGHT;
